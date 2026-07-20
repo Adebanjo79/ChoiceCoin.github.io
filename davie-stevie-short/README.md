@@ -1,16 +1,18 @@
 # Davie & Stevie — “A Petting Zoo in the Highlands”
 
-Animated hyper-realistic short (~54s) from the Glasgow flat cash-bag sketch.
+Live-action-style crime-comedy short (66.5s) from the Glasgow flat cash-bag sketch.
 
 ## Watch
 
-**[`davie_stevie_petting_zoo.mp4`](./davie_stevie_petting_zoo.mp4)** — 1920×1080, H.264 + AAC
+**[`davie_stevie_petting_zoo.mp4`](./davie_stevie_petting_zoo.mp4)** — 1280×720, 24fps, H.264 + stereo AAC
 
 ## What’s in it
 
-- **Visuals:** Photoreal keyframes of Davie’s messy living room, Ken Burns motion cuts synced to dialogue
-- **Voiceover:** Full script, two British male neural voices (Stevie anxious / Davie buzzing), no skipped lines — short beats between exchanges only
-- **Music:** Country acoustic instrumental under the dialogue (ducked so VO stays clear)
+- **Performances:** Waveform-driven facial animation and lip movement for both Davie and Stevie, with subtle handheld motion
+- **Cinematography:** Glasgow exterior, room coverage, close-ups, over-the-shoulder angles, cash inserts, alley flashback, and Highland-zoo reveal
+- **Voiceover:** Full script, distinct Celtic/British male voices (Stevie anxious / Davie buzzing), with no skipped dialogue
+- **Sound:** Country acoustic score, room tone, rain, bag rustle, transitions, and dialogue-aware music ducking
+- **Finish:** Cinematic colour grade, 2.39:1 letterbox, speaker-coded subtitles, opening title, and end card
 
 ## Script
 
