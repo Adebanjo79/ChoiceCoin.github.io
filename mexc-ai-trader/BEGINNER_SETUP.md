@@ -159,10 +159,10 @@ If Windows hides rename tips: right-click → **Rename**.
 TELEGRAM_BOT_TOKEN=7234567890:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TELEGRAM_CHAT_ID=123456789
 ACCOUNT_BALANCE_USDT=1000
-MIN_CONFIDENCE=85
-SCAN_INTERVAL_SECONDS=300
+MIN_CONFIDENCE=80
+SCAN_INTERVAL_SECONDS=600
 MAX_WORKERS=8
-SYMBOL_WHITELIST=BTC_USDT,ETH_USDT,SOL_USDT
+SYMBOL_WHITELIST=
 LOG_LEVEL=INFO
 ```
 
@@ -173,10 +173,10 @@ LOG_LEVEL=INFO
 | `TELEGRAM_BOT_TOKEN` | Password for your Telegram bot |
 | `TELEGRAM_CHAT_ID` | Where alerts are sent (your account) |
 | `ACCOUNT_BALANCE_USDT` | Used only to calculate 1% risk position size |
-| `MIN_CONFIDENCE` | Only alert if score ≥ 85 |
-| `SCAN_INTERVAL_SECONDS` | Wait time between full scans (300 = 5 minutes) |
-| `SYMBOL_WHITELIST` | **Start here.** Only scan these pairs (faster & safer for beginners) |
-| Leave whitelist empty later | Scans all MEXC USDT futures (slower, heavier) |
+| `MIN_CONFIDENCE` | Only alert if score ≥ this number (use `80` for more alerts) |
+| `SCAN_INTERVAL_SECONDS` | Wait time between full scans (`600` = 10 minutes; good for all-coins mode) |
+| `SYMBOL_WHITELIST` | Leave **empty** to scan all MEXC USDT futures. Or list pairs like `BTC_USDT,ETH_USDT` for a small test |
+| `MAX_WORKERS` | How many coins to analyze at once (8 is fine to start) |
 
 3. Press **Ctrl + S** to save.
 

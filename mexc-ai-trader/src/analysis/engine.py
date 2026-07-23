@@ -57,8 +57,8 @@ def _weighted_confidence(factors: list[FactorResult], direction: Direction) -> f
     return round(acc / total_w if total_w else 0.0, 2)
 
 
-def _verdict(direction: Direction, confidence: float) -> Verdict:
-    if direction == Direction.NONE or confidence < 85:
+def _verdict(direction: Direction, confidence: float, min_confidence: float = 80.0) -> Verdict:
+    if direction == Direction.NONE or confidence < min_confidence:
         return Verdict.NO_TRADE if confidence < 70 else Verdict.WAIT
     if direction == Direction.LONG:
         return Verdict.STRONG_BUY if confidence >= 92 else Verdict.BUY
@@ -171,7 +171,7 @@ def analyze_symbol(
         "Unexpected macro headline",
         "Exchange outage or thin book slippage",
     ]
-    verdict = _verdict(direction, confidence)
+    verdict = _verdict(direction, confidence, min_confidence=settings.min_confidence)
 
     return SignalReport(
         symbol=symbol,
