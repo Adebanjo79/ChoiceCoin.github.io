@@ -36,13 +36,13 @@ class Settings:
     account_balance_usdt: float = field(default_factory=lambda: _env_float("ACCOUNT_BALANCE_USDT", 1000.0))
     min_confidence: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE", 80.0))
     scan_interval_seconds: int = field(default_factory=lambda: _env_int("SCAN_INTERVAL_SECONDS", 600))
-    max_workers: int = field(default_factory=lambda: _env_int("MAX_WORKERS", 2))
+    max_workers: int = field(default_factory=lambda: _env_int("MAX_WORKERS", 3))
     symbol_whitelist: list[str] = field(default_factory=lambda: _env_list("SYMBOL_WHITELIST"))
     newsapi_key: str = field(default_factory=lambda: os.getenv("NEWSAPI_KEY", ""))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     mexc_base_url: str = "https://contract.mexc.com"
     # Seconds between each MEXC HTTP call (full-market scans need this)
-    request_gap_seconds: float = field(default_factory=lambda: _env_float("REQUEST_GAP_SECONDS", 0.35))
+    request_gap_seconds: float = field(default_factory=lambda: _env_float("REQUEST_GAP_SECONDS", 0.22))
     fetch_deals: bool = field(
         default_factory=lambda: os.getenv("FETCH_DEALS", "false").strip().lower() in {"1", "true", "yes"}
     )
@@ -52,14 +52,27 @@ class Settings:
     )
     # During long scans, send a progress ping every N finished coins
     status_progress_every: int = field(default_factory=lambda: _env_int("STATUS_PROGRESS_EVERY", 50))
+    # fast = fewer timeframes + skip low-liquidity coins (much quicker)
+    # full = all 4 timeframes on every pair
+    scan_mode: str = field(default_factory=lambda: os.getenv("SCAN_MODE", "fast").strip().lower() or "fast")
+    # Ignore quiet coins (USDT 24h turnover). 0 = keep all.
+    min_turnover_usdt: float = field(default_factory=lambda: _env_float("MIN_TURNOVER_USDT", 300000.0))
+    # After liquidity filter, analyze at most this many top movers (0 = all filtered)
+    scan_top_n: int = field(default_factory=lambda: _env_int("SCAN_TOP_N", 200))
     risk_pct: float = 0.01
     min_rr: float = 2.5
     preferred_rr: float = 3.0
     volume_spike_mult: float = 1.5
     adx_min: float = 25.0
     news_blackout_minutes: int = 60
-    kline_limit: int = 250
+    kline_limit: int = 220
     timeframes: tuple[str, ...] = ("Min15", "Min60", "Hour4", "Day1")
+
+    def active_timeframes(self) -> tuple[str, ...]:
+        if self.scan_mode == "full":
+            return self.timeframes
+        # Fast path still covers short + higher TF confirmation
+        return ("Min15", "Hour4", "Day1")
 
     def telegram_ready(self) -> bool:
         return bool(self.telegram_bot_token and self.telegram_chat_id)

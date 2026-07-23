@@ -36,21 +36,29 @@ class MarketScanner:
 
     def _fetch_frames(self, symbol: str) -> dict[str, Any]:
         frames = {}
-        for tf in self.settings.timeframes:
+        for tf in self.settings.active_timeframes():
             try:
                 frames[tf] = self.client.get_klines(symbol, interval=tf, limit=self.settings.kline_limit)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("%s %s klines failed: %s", symbol, tf, exc)
         return frames
 
-    def analyze_one(self, symbol: str, fundamentals_cache=None) -> SignalReport | None:
+    def analyze_one(
+        self,
+        symbol: str,
+        fundamentals_cache=None,
+        ticker_cache: dict[str, Any] | None = None,
+    ) -> SignalReport | None:
         try:
             frames = self._fetch_frames(symbol)
             if len(frames) < 2:
                 return None
-            ticker = self.client.get_ticker(symbol)
-            if isinstance(ticker, list):
-                ticker = ticker[0] if ticker else {}
+            ticker: dict[str, Any]
+            if ticker_cache and symbol in ticker_cache:
+                ticker = ticker_cache[symbol]
+            else:
+                raw = self.client.get_ticker(symbol)
+                ticker = raw[0] if isinstance(raw, list) and raw else (raw if isinstance(raw, dict) else {})
             deals: list = []
             if self.settings.fetch_deals:
                 try:
@@ -60,7 +68,7 @@ class MarketScanner:
             return analyze_symbol(
                 symbol,
                 frames,
-                ticker=ticker if isinstance(ticker, dict) else {},
+                ticker=ticker,
                 deals=deals,
                 settings=self.settings,
                 fundamentals_cache=fundamentals_cache,
@@ -80,13 +88,60 @@ class MarketScanner:
         self._last_alerted[key] = now
         return True
 
+    def _select_symbols(self) -> tuple[list[str], dict[str, dict[str, Any]], int]:
+        """Return symbols to analyze, ticker cache, and total contract count."""
+        all_symbols = self.client.list_usdt_perpetuals(self.settings.symbol_whitelist or None)
+        total = len(all_symbols)
+
+        tickers_raw = self.client.get_ticker()
+        ticker_list = tickers_raw if isinstance(tickers_raw, list) else [tickers_raw]
+        ticker_cache: dict[str, dict[str, Any]] = {}
+        for t in ticker_list:
+            if isinstance(t, dict) and t.get("symbol"):
+                ticker_cache[str(t["symbol"])] = t
+
+        # Liquidity + activity ranking
+        ranked: list[tuple[float, float, str]] = []
+        for symbol in all_symbols:
+            t = ticker_cache.get(symbol, {})
+            turnover = float(t.get("amount24") or 0)
+            move = abs(float(t.get("riseFallRate") or 0))
+            if self.settings.min_turnover_usdt > 0 and turnover < self.settings.min_turnover_usdt:
+                continue
+            ranked.append((turnover, move, symbol))
+
+        # Prefer higher turnover, then stronger 24h move
+        ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        symbols = [s for _, _, s in ranked]
+        if self.settings.scan_top_n > 0:
+            symbols = symbols[: self.settings.scan_top_n]
+
+        if not symbols:
+            # Fallback if filter too strict
+            logger.warning("Liquidity filter removed all symbols — falling back to full list")
+            symbols = all_symbols
+            if self.settings.scan_top_n > 0:
+                symbols = symbols[: self.settings.scan_top_n]
+
+        return symbols, ticker_cache, total
+
     def run_scan(self) -> list[SignalReport]:
-        symbols = self.client.list_usdt_perpetuals(self.settings.symbol_whitelist or None)
+        symbols, ticker_cache, total_all = self._select_symbols()
         total = len(symbols)
-        logger.info("Scanning %d MEXC USDT perpetual contracts", total)
+        tfs = ", ".join(self.settings.active_timeframes())
+        logger.info(
+            "Scanning %d/%d contracts | mode=%s | tfs=%s | workers=%s",
+            total,
+            total_all,
+            self.settings.scan_mode,
+            tfs,
+            self.settings.max_workers,
+        )
         self._status(
-            f"🔎 Scan started\n"
-            f"Pairs: {total}\n"
+            f"🔎 Fast scan started\n"
+            f"Analyzing: {total} of {total_all} pairs\n"
+            f"Mode: {self.settings.scan_mode}\n"
+            f"Timeframes: {tfs}\n"
             f"Min confidence: {self.settings.min_confidence}%\n"
             f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
         )
@@ -99,7 +154,8 @@ class MarketScanner:
 
         with ThreadPoolExecutor(max_workers=self.settings.max_workers) as pool:
             futures = {
-                pool.submit(self.analyze_one, symbol, fundamentals): symbol for symbol in symbols
+                pool.submit(self.analyze_one, symbol, fundamentals, ticker_cache): symbol
+                for symbol in symbols
             }
             for fut in as_completed(futures):
                 symbol = futures[fut]
@@ -158,20 +214,20 @@ class MarketScanner:
 
     def run_forever(self) -> None:
         logger.info(
-            "Starting 24/7 scanner | interval=%ss | min_confidence=%s",
+            "Starting 24/7 scanner | interval=%ss | min_confidence=%s | mode=%s",
             self.settings.scan_interval_seconds,
             self.settings.min_confidence,
+            self.settings.scan_mode,
         )
         if not self.telegram.enabled:
             logger.warning("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing — alerts print to console")
         else:
             self._status(
-                "✅ MEXC scanner is ONLINE\n"
+                "✅ MEXC scanner is ONLINE (FAST mode)\n"
                 f"Min confidence: {self.settings.min_confidence}%\n"
-                f"Status updates: ON\n"
-                "You will get:\n"
-                "1) heartbeat / progress messages\n"
-                "2) BUY/SELL alerts when confidence is high enough"
+                f"Top pairs per cycle: {self.settings.scan_top_n or 'all liquid'}\n"
+                "Status updates: ON\n"
+                "You will get heartbeats + BUY/SELL alerts"
             )
         while True:
             self._cycle += 1
