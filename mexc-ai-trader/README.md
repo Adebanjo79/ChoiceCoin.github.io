@@ -6,6 +6,9 @@ Scans **MEXC USDT-M Futures** pairs around the clock, runs a multi-factor instit
 
 > Not financial advice. Crypto futures are high risk. This bot does **not** place orders — it only analyzes and alerts.
 
+**New to this?** Follow the full click-by-click guide: **[BEGINNER_SETUP.md](BEGINNER_SETUP.md)**  
+(VS Code → PowerShell test → Telegram → PuTTY/VPS 24/7)
+
 ---
 
 ## Which tool should you use? (specific answer)
