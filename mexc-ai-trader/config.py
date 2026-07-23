@@ -46,6 +46,12 @@ class Settings:
     fetch_deals: bool = field(
         default_factory=lambda: os.getenv("FETCH_DEALS", "false").strip().lower() in {"1", "true", "yes"}
     )
+    # Send Telegram status/heartbeat messages so you know the bot is alive
+    telegram_status: bool = field(
+        default_factory=lambda: os.getenv("TELEGRAM_STATUS", "true").strip().lower() in {"1", "true", "yes"}
+    )
+    # During long scans, send a progress ping every N finished coins
+    status_progress_every: int = field(default_factory=lambda: _env_int("STATUS_PROGRESS_EVERY", 50))
     risk_pct: float = 0.01
     min_rr: float = 2.5
     preferred_rr: float = 3.0
