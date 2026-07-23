@@ -116,6 +116,12 @@ class MarketScanner:
         )
         if not self.telegram.enabled:
             logger.warning("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing — alerts print to console")
+        else:
+            self.telegram.send(
+                "✅ MEXC scanner started.\n"
+                f"Min confidence: {self.settings.min_confidence}%\n"
+                "You will only get alerts for BUY/SELL setups (not NO TRADE)."
+            )
         while True:
             started = time.time()
             try:

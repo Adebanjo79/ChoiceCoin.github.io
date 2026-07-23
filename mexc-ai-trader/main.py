@@ -46,10 +46,23 @@ def main() -> int:
         action="store_true",
         help="Print every report including NO TRADE (verbose)",
     )
+    parser.add_argument(
+        "--test-telegram",
+        action="store_true",
+        help="Send a test message to Telegram and exit",
+    )
     args = parser.parse_args()
     setup_logging(settings.log_level)
 
     scanner = MarketScanner(settings)
+
+    if args.test_telegram:
+        ok = scanner.telegram.send(
+            "✅ MEXC AI Trader test message.\nIf you see this, Telegram is working."
+        )
+        print("Telegram OK" if ok else "Telegram FAILED — check TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, and press Start on your bot")
+        print(f"Token set: {bool(settings.telegram_bot_token)} | Chat ID set: {bool(settings.telegram_chat_id)}")
+        return 0 if ok else 1
 
     if args.symbol:
         symbol = args.symbol.upper().replace("-", "_")
