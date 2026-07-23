@@ -20,7 +20,10 @@ logger = logging.getLogger(__name__)
 class MarketScanner:
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.client = MexcFuturesClient(base_url=settings.mexc_base_url)
+        self.client = MexcFuturesClient(
+            base_url=settings.mexc_base_url,
+            min_request_interval=settings.request_gap_seconds,
+        )
         self.telegram = TelegramAlerter(settings.telegram_bot_token, settings.telegram_chat_id)
         self._last_alerted: dict[str, float] = {}
         self._alert_cooldown_sec = 60 * 60  # 1h per symbol direction
@@ -42,11 +45,12 @@ class MarketScanner:
             ticker = self.client.get_ticker(symbol)
             if isinstance(ticker, list):
                 ticker = ticker[0] if ticker else {}
-            deals = []
-            try:
-                deals = self.client.get_deals(symbol, limit=80)
-            except Exception:  # noqa: BLE001
-                deals = []
+            deals: list = []
+            if self.settings.fetch_deals:
+                try:
+                    deals = self.client.get_deals(symbol, limit=80)
+                except Exception:  # noqa: BLE001
+                    deals = []
             return analyze_symbol(
                 symbol,
                 frames,

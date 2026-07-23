@@ -1,8 +1,9 @@
-"""MEXC Futures public REST client."""
+"""MEXC Futures public REST client with rate-limit protection."""
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -27,26 +28,65 @@ INTERVAL_MAP = {
 
 
 class MexcFuturesClient:
-    def __init__(self, base_url: str = "https://contract.mexc.com", timeout: int = 20):
+    """Shared, thread-safe MEXC client. Slow on purpose to avoid code 510."""
+
+    def __init__(
+        self,
+        base_url: str = "https://contract.mexc.com",
+        timeout: int = 20,
+        min_request_interval: float = 0.35,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.min_request_interval = max(0.05, float(min_request_interval))
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "mexc-ai-trader/1.0"})
+        self.session.headers.update({"User-Agent": "mexc-ai-trader/1.1"})
+        self._lock = threading.Lock()
+        self._last_request_at = 0.0
+
+    def _throttle(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            wait = self.min_request_interval - (now - self._last_request_at)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_request_at = time.monotonic()
+
+    @staticmethod
+    def _is_rate_limited(exc: Exception) -> bool:
+        text = str(exc)
+        return "510" in text or "too frequent" in text.lower() or "429" in text
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         url = f"{self.base_url}{path}"
-        for attempt in range(3):
+        for attempt in range(5):
+            self._throttle()
             try:
                 resp = self.session.get(url, params=params, timeout=self.timeout)
+                if resp.status_code == 429:
+                    raise RuntimeError(f"HTTP 429 on {path}")
                 resp.raise_for_status()
                 payload = resp.json()
                 if isinstance(payload, dict) and payload.get("success") is False:
+                    code = payload.get("code")
+                    if code == 510:
+                        raise RuntimeError(f"MEXC rate limit 510 on {path}: {payload}")
                     raise RuntimeError(f"MEXC error on {path}: {payload}")
                 return payload.get("data", payload) if isinstance(payload, dict) else payload
             except Exception as exc:  # noqa: BLE001
-                wait = 1.5 * (attempt + 1)
-                logger.warning("MEXC GET %s failed (%s); retry in %.1fs", path, exc, wait)
-                time.sleep(wait)
+                if self._is_rate_limited(exc):
+                    wait = min(60.0, 5.0 * (2**attempt))
+                    logger.warning(
+                        "MEXC rate limited on %s — cooling down %.0fs (attempt %d/5)",
+                        path,
+                        wait,
+                        attempt + 1,
+                    )
+                    time.sleep(wait)
+                else:
+                    wait = 1.5 * (attempt + 1)
+                    logger.warning("MEXC GET %s failed (%s); retry in %.1fs", path, exc, wait)
+                    time.sleep(wait)
         raise RuntimeError(f"MEXC GET failed after retries: {path}")
 
     def list_contracts(self) -> list[dict[str, Any]]:
@@ -62,7 +102,6 @@ class MexcFuturesClient:
             symbol = str(c.get("symbol", ""))
             quote = str(c.get("quoteCoin") or c.get("settleCoin") or "")
             state = c.get("state", 0)
-            # state 0 = enabled on MEXC
             if state not in (0, "0", None):
                 continue
             if not symbol.endswith("_USDT") and quote.upper() not in ("USDT", ""):
@@ -84,7 +123,6 @@ class MexcFuturesClient:
 
     def get_klines(self, symbol: str, interval: str = "Min15", limit: int = 250) -> pd.DataFrame:
         mexc_interval = INTERVAL_MAP.get(interval, interval)
-        # MEXC returns arrays of OHLCV keyed by field
         data = self._get(f"/api/v1/contract/kline/{symbol}", params={"interval": mexc_interval})
         if not data:
             return pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
@@ -101,7 +139,6 @@ class MexcFuturesClient:
                 }
             )
         elif isinstance(data, list):
-            # fallback list-of-lists / list-of-dicts
             rows = []
             for item in data:
                 if isinstance(item, dict):

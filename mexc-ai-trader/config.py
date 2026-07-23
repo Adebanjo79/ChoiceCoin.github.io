@@ -36,11 +36,16 @@ class Settings:
     account_balance_usdt: float = field(default_factory=lambda: _env_float("ACCOUNT_BALANCE_USDT", 1000.0))
     min_confidence: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE", 80.0))
     scan_interval_seconds: int = field(default_factory=lambda: _env_int("SCAN_INTERVAL_SECONDS", 600))
-    max_workers: int = field(default_factory=lambda: _env_int("MAX_WORKERS", 8))
+    max_workers: int = field(default_factory=lambda: _env_int("MAX_WORKERS", 2))
     symbol_whitelist: list[str] = field(default_factory=lambda: _env_list("SYMBOL_WHITELIST"))
     newsapi_key: str = field(default_factory=lambda: os.getenv("NEWSAPI_KEY", ""))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     mexc_base_url: str = "https://contract.mexc.com"
+    # Seconds between each MEXC HTTP call (full-market scans need this)
+    request_gap_seconds: float = field(default_factory=lambda: _env_float("REQUEST_GAP_SECONDS", 0.35))
+    fetch_deals: bool = field(
+        default_factory=lambda: os.getenv("FETCH_DEALS", "false").strip().lower() in {"1", "true", "yes"}
+    )
     risk_pct: float = 0.01
     min_rr: float = 2.5
     preferred_rr: float = 3.0
