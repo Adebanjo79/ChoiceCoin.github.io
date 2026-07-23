@@ -1,5 +1,5 @@
-# MEXC AI Trading Assistant — PowerShell setup (Windows)
-# Run in PowerShell:  Set-ExecutionPolicy -Scope Process Bypass; .\scripts\setup_windows.ps1
+# MEXC AI Trading Assistant - PowerShell setup (Windows)
+# Run: Set-ExecutionPolicy -Scope Process Bypass; .\scripts\setup_windows.ps1
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
@@ -15,7 +15,10 @@ pip install -r requirements.txt
 
 if (-not (Test-Path ".env")) {
     Copy-Item ".env.example" ".env"
-    Write-Host "==> Created .env — edit TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID" -ForegroundColor Yellow
+    Write-Host "==> Created .env - edit TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID" -ForegroundColor Yellow
+}
+else {
+    Write-Host "==> .env already exists - leaving it unchanged" -ForegroundColor Cyan
 }
 
 Write-Host ""
