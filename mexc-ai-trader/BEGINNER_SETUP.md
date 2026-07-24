@@ -1,0 +1,254 @@
+# Beginner Setup — MEXC Spot Signals (Step by Step)
+
+Follow this **in order**. Do not skip steps.
+
+You will use three tools for different jobs:
+
+| Tool | When you use it |
+|------|-----------------|
+| **VS Code** | Open the project and edit settings (`.env`) |
+| **PowerShell** | Install and **test** the bot on your Windows PC |
+| **PuTTY** | Later — connect to a VPS so the bot runs **24/7** when your PC is off |
+
+### Specific answer (read this)
+
+- Use **VS Code** to edit code and `.env`.
+- Use **PowerShell** (inside VS Code Terminal) to install and test.
+- Use **PuTTY + a Linux VPS** for true offline 24/7 scanning.
+- Do **not** leave PowerShell running on a sleeping laptop and expect overnight alerts.
+
+**This bot sends SPOT signals (BUY / SELL exit), not futures.**  
+Defaults: **50 USDT** account sizing and **~50%** TP3 upside aim.
+
+---
+
+# PART 1 — Install the basics (one time)
+
+## Step 1. Install Python
+
+1. Open https://www.python.org/downloads/
+2. Download and run the installer.
+3. **IMPORTANT:** tick **“Add python.exe to PATH”**.
+4. Install → Close.
+
+Check in PowerShell:
+
+```powershell
+python --version
+```
+
+You want `Python 3.11+`.
+
+---
+
+## Step 2. Install VS Code
+
+1. https://code.visualstudio.com/
+2. Install, then open VS Code.
+3. Optional: Extensions → install **Python** (Microsoft).
+
+---
+
+## Step 3. Get the `mexc-ai-trader` folder
+
+### Option A — ZIP from GitHub
+
+Download ZIP → unzip → find the folder that contains `main.py`.
+
+Example path:
+
+`C:\Users\YOURNAME\Desktop\mexc-ai-trader`
+
+### Option B — Git
+
+```powershell
+cd $HOME\Desktop
+git clone https://github.com/Adebanjo79/ChoiceCoin.github.io.git
+cd ChoiceCoin.github.io\mexc-ai-trader
+```
+
+If using this PR branch:
+
+```powershell
+git fetch origin
+git checkout cursor/mexc-spot-ai-trading-assistant-840c
+cd mexc-ai-trader
+```
+
+---
+
+## Step 4. Open in VS Code
+
+**File → Open Folder…** → select `mexc-ai-trader` (the folder with `main.py`).
+
+---
+
+# PART 2 — Telegram alerts
+
+## Step 5. Create bot with @BotFather
+
+1. Telegram → `@BotFather` → `/newbot`
+2. Copy the **token**.
+
+## Step 6. Get chat id
+
+1. Telegram → `@userinfobot` → Start
+2. Copy your **Id** number.
+
+## Step 7. Open your bot and tap **Start**
+
+---
+
+# PART 3 — Configure in VS Code
+
+## Step 8–9. Create `.env`
+
+1. Copy `.env.example` → rename to `.env`
+2. Edit:
+
+```env
+TELEGRAM_BOT_TOKEN=paste_token_here
+TELEGRAM_CHAT_ID=paste_chat_id_here
+ACCOUNT_BALANCE_USDT=50
+TARGET_UPSIDE_PCT=50
+MIN_CONFIDENCE=85
+SCAN_INTERVAL_SECONDS=300
+SCAN_MODE=fast
+SYMBOL_WHITELIST=
+LOG_LEVEL=INFO
+```
+
+| Setting | Meaning |
+|---------|---------|
+| `ACCOUNT_BALANCE_USDT` | Your spot book (default **50**) — used for 1% risk size |
+| `TARGET_UPSIDE_PCT` | TP3 aims near this **% price gain** (default **50**) |
+| `MIN_CONFIDENCE` | Only alert if score ≥ this (**85** = strict) |
+| `SYMBOL_WHITELIST` | Empty = scan liquid spot pairs. Or `BTCUSDT,ETHUSDT` |
+
+Save with **Ctrl + S**.
+
+---
+
+# PART 4 — Test with PowerShell (VS Code Terminal)
+
+## Step 10. New Terminal → PowerShell
+
+**Terminal → New Terminal** (choose PowerShell).
+
+## Step 11. Setup
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\setup_windows.ps1
+```
+
+## Step 12. Activate every new terminal
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+## Step 13. Test one spot pair
+
+```powershell
+python main.py --symbol BTCUSDT
+```
+
+Also works: `BTC_USDT` or `btc/usdt` (normalized to spot).
+
+You will often see `NO TRADE` — that is normal (strict filters).
+
+## Step 14. One full scan
+
+```powershell
+python main.py --once
+```
+
+## Step 15. Local loop (PC must stay awake)
+
+```powershell
+python main.py
+```
+
+Stop with **Ctrl + C**.
+
+**Laptop sleep = bot stops.** For real 24/7 → Part 5.
+
+---
+
+# PART 5 — 24/7 offline (PuTTY + VPS)
+
+## Step 16–18. VPS + PuTTY
+
+1. Rent Ubuntu VPS, save IP / user / password.
+2. Install PuTTY → Host = VPS IP → Port 22 → Open → login.
+
+## Step 19–21. Install project on VPS
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip git tmux
+cd ~
+git clone https://github.com/Adebanjo79/ChoiceCoin.github.io.git
+cd ChoiceCoin.github.io
+git fetch origin
+git checkout cursor/mexc-spot-ai-trading-assistant-840c
+cd mexc-ai-trader
+bash scripts/setup_linux.sh
+nano .env
+```
+
+Put the same Telegram values + `ACCOUNT_BALANCE_USDT=50` + `TARGET_UPSIDE_PCT=50`.
+
+## Step 22. Run under tmux (survives closing PuTTY)
+
+```bash
+tmux new -s mexc-spot
+source .venv/bin/activate
+python main.py
+```
+
+Detach: `Ctrl+b` then `d`  
+Reattach: `tmux attach -t mexc-spot`
+
+---
+
+# PART 6 — How to read a spot alert
+
+Example meaning for a **50 USDT** book:
+
+- **BUY (spot)** = consider buying the coin on MEXC Spot
+- **SELL (spot exit)** = consider selling / taking profit on a holding
+- **TP3 ~50%** = stretch target toward +50% price move (more common on alts than BTC)
+- **Position size** = sized so you risk ~**1% of 50 USDT = 0.50 USDT** if stop hits
+- Bot does **not** auto-buy — you place the order yourself
+
+---
+
+# Cheat sheet
+
+### Windows (PowerShell in VS Code)
+
+```powershell
+cd path\to\mexc-ai-trader
+.\.venv\Scripts\Activate.ps1
+python main.py --test-telegram
+python main.py --symbol BTCUSDT
+python main.py --once
+python main.py
+```
+
+### VPS (after PuTTY)
+
+```bash
+cd ~/ChoiceCoin.github.io/mexc-ai-trader
+tmux attach -t mexc-spot
+```
+
+---
+
+# Safety
+
+- Never share your Telegram bot token.
+- Spot still loses money — start small and paper-check.
+- Not financial advice. Bot alerts only; it does not place orders.
