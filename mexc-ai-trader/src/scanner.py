@@ -283,8 +283,10 @@ class MarketScanner:
             self.telegram.send(
                 "✅ MEXC SPOT scanner ONLINE\n"
                 f"Alerts = spot BUY/SELL only (≥{self.settings.min_confidence}%)\n"
-                f"Account sizing: {self.settings.account_balance_usdt:.0f} USDT | TP3 aim ≈{self.settings.target_upside_pct:.0f}%\n"
-                "Type status in this chat anytime for live scan details.\n"
+                f"Account sizing: {self.settings.account_balance_usdt:.0f} USDT | "
+                f"TP3 aim ≈{self.settings.target_upside_pct:.0f}%\n\n"
+                "Manual status check:\n"
+                "Type status (or /status) in this chat anytime.\n"
                 "Type help for commands."
             )
         while True:

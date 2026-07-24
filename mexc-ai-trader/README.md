@@ -175,6 +175,14 @@ python main.py --test-telegram
 
 Non-actionable: `NO TRADE – WAIT FOR BETTER CONFIRMATION.`
 
+### Manual Telegram status
+
+While the bot is running (`python main.py`):
+
+- Type `status` or `/status` in your bot chat → live scan update
+- Type `help` → command list
+- Keep `TELEGRAM_STATUS=false` to avoid automatic scan spam
+
 ---
 
 ## Project layout

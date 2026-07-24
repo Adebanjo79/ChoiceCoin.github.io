@@ -62,7 +62,10 @@ def main() -> int:
             "✅ MEXC Spot AI Trader test message.\n"
             "If you see this, Telegram is working.\n"
             f"Account sizing: {settings.account_balance_usdt:.0f} USDT | "
-            f"TP3 aim ≈{settings.target_upside_pct:.0f}%"
+            f"TP3 aim ≈{settings.target_upside_pct:.0f}%\n\n"
+            "Next: run  python main.py\n"
+            "Then in Telegram type: status\n"
+            "(manual live check while the bot is running)"
         )
         print(
             "Telegram OK"

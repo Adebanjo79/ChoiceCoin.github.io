@@ -204,6 +204,24 @@ Stop with **Ctrl + C**.
 
 **Laptop sleep = bot stops.** For real 24/7 → Part 5.
 
+## Step 15b. Ask for status on Telegram (manual)
+
+While `python main.py` is running:
+
+1. Open your bot chat in Telegram  
+2. Type:
+
+```text
+status
+```
+
+(or `/status`)
+
+3. Bot replies with live scan info (cycle, pairs checked, last signal, closest setups)
+
+Keep `TELEGRAM_STATUS=false` so it does **not** spam. You ask `status` only when you want an update.  
+Also works: `help`
+
 ---
 
 # PART 5 — 24/7 offline (PuTTY + VPS)
