@@ -1,6 +1,6 @@
 # MEXC AI Spot Trading Assistant
 
-Scans **MEXC Spot USDT** pairs around the clock, runs a multi-factor institutional-style checklist, and sends **Telegram** alerts only when confidence is **≥ 85%**. Incomplete setups return:
+Scans **MEXC Spot USDT** pairs around the clock, runs a multi-factor institutional-style checklist, and sends **Telegram** alerts when confidence is **≥ 70%** *and* quality filters pass (BTC calm + volume + not news). Incomplete setups return:
 
 `NO TRADE – WAIT FOR BETTER CONFIRMATION.`
 

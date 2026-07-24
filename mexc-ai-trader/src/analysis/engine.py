@@ -60,7 +60,7 @@ def _weighted_confidence(factors: list[FactorResult], direction: Direction) -> f
     return round(acc / total_w if total_w else 0.0, 2)
 
 
-def _verdict(direction: Direction, confidence: float, min_confidence: float = 85.0) -> Verdict:
+def _verdict(direction: Direction, confidence: float, min_confidence: float = 70.0) -> Verdict:
     if direction == Direction.NONE or confidence < min_confidence:
         return Verdict.NO_TRADE if confidence < 70 else Verdict.WAIT
     if direction == Direction.LONG:
