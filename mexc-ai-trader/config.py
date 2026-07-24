@@ -34,7 +34,7 @@ class Settings:
     telegram_bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
     account_balance_usdt: float = field(default_factory=lambda: _env_float("ACCOUNT_BALANCE_USDT", 1000.0))
-    min_confidence: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE", 80.0))
+    min_confidence: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE", 70.0))
     scan_interval_seconds: int = field(default_factory=lambda: _env_int("SCAN_INTERVAL_SECONDS", 600))
     max_workers: int = field(default_factory=lambda: _env_int("MAX_WORKERS", 3))
     symbol_whitelist: list[str] = field(default_factory=lambda: _env_list("SYMBOL_WHITELIST"))
@@ -48,7 +48,7 @@ class Settings:
     )
     # Send Telegram status/heartbeat messages so you know the bot is alive
     telegram_status: bool = field(
-        default_factory=lambda: os.getenv("TELEGRAM_STATUS", "true").strip().lower() in {"1", "true", "yes"}
+        default_factory=lambda: os.getenv("TELEGRAM_STATUS", "false").strip().lower() in {"1", "true", "yes"}
     )
     # During long scans, send a progress ping every N finished coins
     status_progress_every: int = field(default_factory=lambda: _env_int("STATUS_PROGRESS_EVERY", 50))
@@ -59,6 +59,19 @@ class Settings:
     min_turnover_usdt: float = field(default_factory=lambda: _env_float("MIN_TURNOVER_USDT", 300000.0))
     # After liquidity filter, analyze at most this many top movers (0 = all filtered)
     scan_top_n: int = field(default_factory=lambda: _env_int("SCAN_TOP_N", 200))
+    # Quiet Telegram: false = only trade signals (no scan spam)
+    # Quality filters for 70% confidence regime
+    quality_filters: bool = field(
+        default_factory=lambda: os.getenv("QUALITY_FILTERS", "true").strip().lower() in {"1", "true", "yes"}
+    )
+    max_btc_volatility_pct: float = field(
+        default_factory=lambda: _env_float("BTC_MAX_VOLATILITY_PCT", 1.20)
+    )
+    require_volume_above_avg: bool = field(
+        default_factory=lambda: os.getenv("REQUIRE_VOLUME_ABOVE_AVG", "true").strip().lower()
+        in {"1", "true", "yes"}
+    )
+    min_aligned_factors: int = field(default_factory=lambda: _env_int("MIN_ALIGNED_FACTORS", 2))
     risk_pct: float = 0.01
     min_rr: float = 2.5
     preferred_rr: float = 3.0

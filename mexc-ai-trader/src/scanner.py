@@ -48,6 +48,7 @@ class MarketScanner:
         symbol: str,
         fundamentals_cache=None,
         ticker_cache: dict[str, Any] | None = None,
+        btc_df=None,
     ) -> SignalReport | None:
         try:
             frames = self._fetch_frames(symbol)
@@ -72,6 +73,7 @@ class MarketScanner:
                 deals=deals,
                 settings=self.settings,
                 fundamentals_cache=fundamentals_cache,
+                btc_df=btc_df,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Analyze failed for %s: %s", symbol, exc)
@@ -147,6 +149,12 @@ class MarketScanner:
         )
 
         fundamentals = analyze_fundamentals(self.settings.newsapi_key, symbol="BTC_USDT")
+        btc_df = None
+        try:
+            btc_df = self.client.get_klines("BTC_USDT", interval="Min15", limit=self.settings.kline_limit)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("BTC volatility frame failed: %s", exc)
+
         results: list[SignalReport] = []
         actionable = 0
         done = 0
@@ -154,7 +162,7 @@ class MarketScanner:
 
         with ThreadPoolExecutor(max_workers=self.settings.max_workers) as pool:
             futures = {
-                pool.submit(self.analyze_one, symbol, fundamentals, ticker_cache): symbol
+                pool.submit(self.analyze_one, symbol, fundamentals, ticker_cache, btc_df): symbol
                 for symbol in symbols
             }
             for fut in as_completed(futures):
@@ -222,12 +230,11 @@ class MarketScanner:
         if not self.telegram.enabled:
             logger.warning("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing — alerts print to console")
         else:
-            self._status(
-                "✅ MEXC scanner is ONLINE (FAST mode)\n"
-                f"Min confidence: {self.settings.min_confidence}%\n"
-                f"Top pairs per cycle: {self.settings.scan_top_n or 'all liquid'}\n"
-                "Status updates: ON\n"
-                "You will get heartbeats + BUY/SELL alerts"
+            # One short online ping only (no scan spam when TELEGRAM_STATUS=false)
+            self.telegram.send(
+                "✅ MEXC scanner ONLINE\n"
+                f"Alerts only on trade signals (≥{self.settings.min_confidence}%)\n"
+                "Status spam: OFF | Quality filters: ON"
             )
         while True:
             self._cycle += 1

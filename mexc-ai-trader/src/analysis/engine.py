@@ -15,10 +15,13 @@ from src.analysis.price_action import analyze_price_action
 from src.analysis.smc import analyze_smc
 from src.analysis.trend import analyze_trend, higher_tf_summary
 from src.analysis.volume import analyze_volume
+from src.analysis.quality import apply_quality_filters, btc_atr_pct
 from src.models import NO_TRADE_MSG, Direction, FactorResult, SignalReport, Verdict
 from src.risk import build_trade_levels
 
 logger = logging.getLogger(__name__)
+
+KEY_FACTORS = ("Trend", "Momentum", "Volume", "Price Action", "Smart Money Concepts")
 
 WEIGHTS = {
     "Trend": 0.25,
@@ -81,6 +84,7 @@ def analyze_symbol(
     deals: list[dict[str, Any]] | None,
     settings: Settings,
     fundamentals_cache: FactorResult | None = None,
+    btc_df: pd.DataFrame | None = None,
 ) -> SignalReport:
     primary = frames.get("Min15")
     if primary is None or getattr(primary, "empty", False):
@@ -102,7 +106,8 @@ def analyze_symbol(
     direction = _combine_direction(factors)
     confidence = _weighted_confidence(factors, direction) if direction != Direction.NONE else _weighted_confidence(factors, Direction.LONG)
 
-    missing = [f.name for f in factors if f.name in ("Trend", "Momentum", "Volume", "Price Action", "Smart Money Concepts") and not f.aligned]
+    aligned_keys = [f.name for f in factors if f.name in KEY_FACTORS and f.aligned]
+    missing = [name for name in KEY_FACTORS if name not in aligned_keys]
     why: list[str] = []
     for f in factors:
         if f.direction == direction and f.aligned:
@@ -125,8 +130,28 @@ def analyze_symbol(
         reject_reasons.append("Low liquidity without clear breakout")
     if not fund.aligned and any("blackout" in d.lower() or "wait" in d.lower() for d in fund.details):
         reject_reasons.append("Major news / macro window within 30–60 minutes")
-    if missing:
-        reject_reasons.append(f"Missing key confirmations: {', '.join(missing)}")
+
+    # Require a minimum number of aligned pillars (default 2) instead of all five
+    min_aligned = getattr(settings, "min_aligned_factors", 2)
+    if len(aligned_keys) < min_aligned:
+        reject_reasons.append(
+            f"Only {len(aligned_keys)}/{len(KEY_FACTORS)} key factors aligned (need {min_aligned})"
+        )
+
+    # Quality filters for 70% regime: calm BTC + volume > avg + not news time
+    if getattr(settings, "quality_filters", True):
+        btc_vol = btc_atr_pct(btc_df)
+        q_rejects = apply_quality_filters(
+            primary=primary,
+            fund_details=fund.details,
+            btc_volatility_pct=btc_vol,
+            max_btc_volatility_pct=settings.max_btc_volatility_pct,
+            require_volume_above_avg=settings.require_volume_above_avg,
+        )
+        reject_reasons.extend(q_rejects)
+        if btc_vol is not None:
+            why.append(f"BTC ATR%={btc_vol:.2f} (max {settings.max_btc_volatility_pct:.2f})")
+
     if direction == Direction.NONE:
         reject_reasons.append("No clear directional alignment across factors")
 
@@ -144,7 +169,7 @@ def analyze_symbol(
             reject_reasons.append("Risk:Reward < 1:2.5 or stop beyond acceptable risk")
 
     if reject_reasons or confidence < settings.min_confidence or levels is None:
-        verdict = Verdict.NO_TRADE if confidence < 70 else Verdict.WAIT
+        verdict = Verdict.NO_TRADE if confidence < settings.min_confidence else Verdict.WAIT
         return SignalReport(
             symbol=symbol,
             direction=Direction.NONE,
@@ -158,7 +183,7 @@ def analyze_symbol(
             invalidation=["N/A — no active trade"],
             major_risks=reject_reasons,
             factor_scores=factor_scores,
-            raw={"factors": {f.name: f.details for f in factors}},
+            raw={"factors": {f.name: f.details for f in factors}, "missing": missing},
         )
 
     invalidation = [
