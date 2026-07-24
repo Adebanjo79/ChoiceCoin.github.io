@@ -37,6 +37,8 @@ class MarketScanner:
         )
 
     def _status(self, text: str) -> None:
+        # Progress/heartbeat spam is disabled. User asks via Telegram "status".
+        # Keep this method for optional debug only when TELEGRAM_STATUS=true.
         if self.settings.telegram_status and self.telegram.enabled:
             self.telegram.send(text)
 
@@ -259,14 +261,9 @@ class MarketScanner:
             logger.warning("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing — alerts print to console")
         else:
             self.telegram.start_command_listener(RUNTIME.format_message)
-            me = self.telegram.get_me()
-            bot_name = me.get("username") or "your_futures_bot"
-            self.telegram.send(
-                "✅ MEXC FUTURES scanner ONLINE\n"
-                f"Bot: @{bot_name}\n"
-                f"Alerts only on trade signals (≥{self.settings.min_confidence}%)\n"
-                f"Open @{bot_name} and type: status\n"
-                "(Do not type status in your spot/NFT bot chat)"
+            # No auto ONLINE/scan spam. User types "status"; signals send automatically.
+            logger.info(
+                "Telegram quiet mode: signals only + on-demand status (type status in chat)"
             )
         while True:
             self._cycle += 1
