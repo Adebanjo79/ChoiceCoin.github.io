@@ -31,8 +31,12 @@ def _env_list(name: str) -> list[str]:
 
 @dataclass(frozen=True)
 class Settings:
-    telegram_bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
-    telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
+    telegram_bot_token: str = field(
+        default_factory=lambda: (os.getenv("TELEGRAM_BOT_TOKEN", "") or "").strip().strip('"').strip("'")
+    )
+    telegram_chat_id: str = field(
+        default_factory=lambda: (os.getenv("TELEGRAM_CHAT_ID", "") or "").strip().strip('"').strip("'")
+    )
     account_balance_usdt: float = field(default_factory=lambda: _env_float("ACCOUNT_BALANCE_USDT", 1000.0))
     min_confidence: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE", 70.0))
     scan_interval_seconds: int = field(default_factory=lambda: _env_int("SCAN_INTERVAL_SECONDS", 600))
