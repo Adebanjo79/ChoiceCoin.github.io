@@ -123,6 +123,7 @@ class MarketScanner:
             if isinstance(t, dict) and t.get("symbol"):
                 ticker_cache[normalize_spot_symbol(str(t["symbol"]))] = t
 
+        # Rank every USDT pair by 24h quote volume (liquidity), then move strength
         ranked: list[tuple[float, float, str]] = []
         for symbol in all_symbols:
             t = ticker_cache.get(symbol, {})
@@ -131,20 +132,29 @@ class MarketScanner:
                 move = abs(float(t.get("priceChangePercent") or 0))
             except (TypeError, ValueError):
                 move = 0.0
-            if self.settings.min_turnover_usdt > 0 and turnover < self.settings.min_turnover_usdt:
-                continue
             ranked.append((turnover, move, symbol))
 
         ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
-        symbols = [s for _, _, s in ranked]
-        if self.settings.scan_top_n > 0:
-            symbols = symbols[: self.settings.scan_top_n]
+        top_n = self.settings.scan_top_n if self.settings.scan_top_n > 0 else len(ranked)
+        min_turn = self.settings.min_turnover_usdt
+
+        # Prefer pairs above turnover floor, but ALWAYS fill up to top_n by liquidity
+        liquid = [s for turn, _, s in ranked if min_turn <= 0 or turn >= min_turn]
+        if len(liquid) >= top_n:
+            symbols = liquid[:top_n]
+        else:
+            # Not enough pairs met the floor — take the most liquid top_n overall
+            symbols = [s for _, _, s in ranked[:top_n]]
+            logger.info(
+                "Only %d pairs met turnover>=%.0f USDT; scanning top %d by liquidity instead",
+                len(liquid),
+                min_turn,
+                len(symbols),
+            )
 
         if not symbols:
-            logger.warning("Liquidity filter removed all symbols — falling back to full list")
-            symbols = all_symbols
-            if self.settings.scan_top_n > 0:
-                symbols = symbols[: self.settings.scan_top_n]
+            logger.warning("No spot symbols available — empty market list")
+            symbols = all_symbols[:top_n] if top_n else all_symbols
 
         return symbols, ticker_cache, total
 

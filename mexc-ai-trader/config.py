@@ -69,7 +69,9 @@ class Settings:
     )
     status_progress_every: int = field(default_factory=lambda: _env_int("STATUS_PROGRESS_EVERY", 50))
     scan_mode: str = field(default_factory=lambda: os.getenv("SCAN_MODE", "fast").strip().lower() or "fast")
-    min_turnover_usdt: float = field(default_factory=lambda: _env_float("MIN_TURNOVER_USDT", 300000.0))
+    # Soft liquidity preference (USDT 24h quote volume). Top-N still fills to SCAN_TOP_N.
+    min_turnover_usdt: float = field(default_factory=lambda: _env_float("MIN_TURNOVER_USDT", 100000.0))
+    # Always aim to scan this many most-liquid spot pairs
     scan_top_n: int = field(default_factory=lambda: _env_int("SCAN_TOP_N", 200))
     quality_filters: bool = field(
         default_factory=lambda: os.getenv("QUALITY_FILTERS", "true").strip().lower() in {"1", "true", "yes"}
