@@ -1,0 +1,15 @@
+[Unit]
+Description=MEXC Spot AI Trading Assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/ChoiceCoin.github.io/mexc-ai-trader
+ExecStart=/root/ChoiceCoin.github.io/mexc-ai-trader/.venv/bin/python /root/ChoiceCoin.github.io/mexc-ai-trader/main.py
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
