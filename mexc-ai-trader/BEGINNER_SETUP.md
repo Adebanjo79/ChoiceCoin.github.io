@@ -111,10 +111,14 @@ TELEGRAM_BOT_TOKEN=paste_token_here
 TELEGRAM_CHAT_ID=paste_chat_id_here
 ACCOUNT_BALANCE_USDT=50
 TARGET_UPSIDE_PCT=50
-MIN_CONFIDENCE=85
+MIN_CONFIDENCE=70
+QUALITY_FILTERS=true
+BTC_MAX_VOLATILITY_PCT=1.20
+REQUIRE_VOLUME_ABOVE_AVG=true
 SCAN_INTERVAL_SECONDS=300
 SCAN_MODE=fast
 SYMBOL_WHITELIST=
+TELEGRAM_STATUS=false
 LOG_LEVEL=INFO
 ```
 
@@ -122,8 +126,34 @@ LOG_LEVEL=INFO
 |---------|---------|
 | `ACCOUNT_BALANCE_USDT` | Your spot book (default **50**) — used for 1% risk size |
 | `TARGET_UPSIDE_PCT` | TP3 aims near this **% price gain** (default **50**) |
-| `MIN_CONFIDENCE` | Only alert if score ≥ this (**85** = strict) |
-| `SYMBOL_WHITELIST` | Empty = scan liquid spot pairs. Or `BTCUSDT,ETHUSDT` |
+| `MIN_CONFIDENCE` | Use **70** with quality filters (anti-spam) |
+| `QUALITY_FILTERS` | Must be `true` at 70%: BTC vol &lt; X, volume &gt; 20-avg, not news time |
+| `BTC_MAX_VOLATILITY_PCT` | Your **X** (default `1.20`) — reject if BTC ATR% is higher |
+| `SYMBOL_WHITELIST` | Empty = scan liquid spot pairs. Or `BTCUSDT,ETHUSDT` for first tests |
+
+---
+
+# YOUR NEXT STEPS (do in order)
+
+1. **VS Code** → open `mexc-ai-trader` → create `.env` from `.env.example` (values above).
+2. **PowerShell** (VS Code terminal):
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\setup_windows.ps1
+.\.venv\Scripts\Activate.ps1
+python main.py --test-telegram
+python main.py --symbol BTCUSDT
+python main.py --once
+```
+
+3. If Telegram test works and `--once` finishes, run locally:
+
+```powershell
+python main.py
+```
+
+4. When you want **24/7 offline**: rent a VPS → **PuTTY** → `tmux` → `python main.py` (Part 5 below).
 
 Save with **Ctrl + S**.
 

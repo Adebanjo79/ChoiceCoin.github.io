@@ -68,10 +68,13 @@ Do **not** rely on laptop PowerShell alone if you need signals overnight.
 
 **Trade rules enforced in code**
 
-- Emit only if confidence ≥ 85% and key factors align  
-- Reject HTF conflicts, low-liquidity chop, news blackout windows  
+- Default alert threshold **70%**, but only if **quality filters** pass (anti-spam):
+  - BTC volatility &lt; `BTC_MAX_VOLATILITY_PCT` (default **1.20**)
+  - Volume &gt; 20-period average
+  - Not news / macro time
+- Reject HTF conflicts, low-liquidity chop  
 - Min R:R **1:2.5** (targets use ~1:3), SL beyond structure, size = **1%** account risk  
-- Spot only — no futures leverage  
+- Spot only — no futures leverage; TP3 aim ≈ **50%** (`TARGET_UPSIDE_PCT`)
 
 ---
 
@@ -96,7 +99,11 @@ notepad .env   # or edit in VS Code
 ```env
 ACCOUNT_BALANCE_USDT=50
 TARGET_UPSIDE_PCT=50
-MIN_CONFIDENCE=85
+MIN_CONFIDENCE=70
+QUALITY_FILTERS=true
+BTC_MAX_VOLATILITY_PCT=1.20
+REQUIRE_VOLUME_ABOVE_AVG=true
+TELEGRAM_STATUS=false
 ```
 
 7. Test:
