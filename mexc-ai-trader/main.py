@@ -58,6 +58,51 @@ def main() -> int:
     scanner = MarketScanner(settings)
 
     if args.test_telegram:
+        from pathlib import Path as _P
+
+        import requests
+
+        env_path = ROOT / ".env"
+        token = settings.telegram_bot_token
+        chat = settings.telegram_chat_id
+        print(f".env path: {env_path}")
+        print(f".env exists: {env_path.exists()}")
+        print(f"Token length: {len(token)} | has colon (:): {':' in token}")
+        if token:
+            print(f"Token preview: {token[:6]}...{token[-4:]}")
+        else:
+            print("Token preview: (empty)")
+        print(f"Chat ID: {chat!r}")
+
+        # Validate token with Telegram getMe (does not send a message yet)
+        if not token:
+            print("FAIL: TELEGRAM_BOT_TOKEN is empty in .env")
+            return 1
+        if ":" not in token or len(token) < 30:
+            print("FAIL: token format looks wrong. Expected like 123456:AAHxxxx...")
+            print("Open .env in VS Code/Notepad and paste a fresh token from @BotFather")
+            return 1
+
+        try:
+            me = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=20)
+            print(f"Telegram getMe HTTP: {me.status_code}")
+            print(f"Telegram getMe body: {me.text[:300]}")
+            if me.status_code == 401 or not me.json().get("ok"):
+                print("")
+                print("401 = BAD BOT TOKEN.")
+                print("Fix:")
+                print("1) Telegram -> @BotFather -> /mybots -> your bot -> API Token")
+                print("2) Copy FULL token")
+                print("3) Edit .env in Notepad (do NOT paste into PowerShell)")
+                print("4) Save, then run this test again")
+                print("")
+                print("PowerShell open .env command:")
+                print("  notepad .env")
+                return 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"Could not reach Telegram getMe: {exc}")
+            return 1
+
         ok = scanner.telegram.send(
             "✅ MEXC Spot AI Trader test message.\n"
             "If you see this, Telegram is working.\n"
@@ -67,15 +112,8 @@ def main() -> int:
             "Then in Telegram type: status\n"
             "(manual live check while the bot is running)"
         )
-        print(
-            "Telegram OK"
-            if ok
-            else "Telegram FAILED — check TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, and press Start on your bot"
-        )
-        print(
-            f"Token set: {bool(settings.telegram_bot_token)} | "
-            f"Chat ID set: {bool(settings.telegram_chat_id)}"
-        )
+        print("Telegram OK" if ok else "Telegram FAILED — token OK but send failed (check chat id + press Start on bot)")
+        print(f"Token set: {bool(token)} | Chat ID set: {bool(chat)}")
         return 0 if ok else 1
 
     if args.symbol:

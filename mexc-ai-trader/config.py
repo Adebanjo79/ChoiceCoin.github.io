@@ -9,21 +9,28 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent
-load_dotenv(ROOT / ".env")
+load_dotenv(ROOT / ".env", override=True)
+
+
+def _clean_env(value: str | None) -> str:
+    """Strip spaces/quotes that break Telegram when pasted into .env."""
+    if not value:
+        return ""
+    return value.strip().strip('"').strip("'").strip()
 
 
 def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
+    raw = _clean_env(os.getenv(name))
     return float(raw) if raw not in (None, "") else default
 
 
 def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
+    raw = _clean_env(os.getenv(name))
     return int(raw) if raw not in (None, "") else default
 
 
 def _env_list(name: str) -> list[str]:
-    raw = os.getenv(name, "").strip()
+    raw = _clean_env(os.getenv(name, ""))
     if not raw:
         return []
     return [item.strip().upper() for item in raw.split(",") if item.strip()]
@@ -31,8 +38,12 @@ def _env_list(name: str) -> list[str]:
 
 @dataclass(frozen=True)
 class Settings:
-    telegram_bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
-    telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
+    telegram_bot_token: str = field(
+        default_factory=lambda: _clean_env(os.getenv("TELEGRAM_BOT_TOKEN", ""))
+    )
+    telegram_chat_id: str = field(
+        default_factory=lambda: _clean_env(os.getenv("TELEGRAM_CHAT_ID", ""))
+    )
     # Default 50 USDT — matches "50 USDT upward / ~50% gain" spot goal
     account_balance_usdt: float = field(default_factory=lambda: _env_float("ACCOUNT_BALANCE_USDT", 50.0))
     # 70% + QUALITY_FILTERS is the recommended anti-spam mode
