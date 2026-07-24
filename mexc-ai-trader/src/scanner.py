@@ -13,6 +13,7 @@ from src.analysis.engine import analyze_symbol, format_report
 from src.analysis.fundamentals import analyze_fundamentals
 from src.mexc_client import MexcFuturesClient
 from src.models import SignalReport
+from src.runtime_status import RUNTIME
 from src.telegram_alerter import TelegramAlerter
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,11 @@ class MarketScanner:
         self._last_alerted: dict[str, float] = {}
         self._alert_cooldown_sec = 60 * 60  # 1h per symbol direction
         self._cycle = 0
+        RUNTIME.update(
+            mode=settings.scan_mode,
+            min_confidence=settings.min_confidence,
+            phase="starting",
+        )
 
     def _status(self, text: str) -> None:
         if self.settings.telegram_status and self.telegram.enabled:
@@ -102,7 +108,6 @@ class MarketScanner:
             if isinstance(t, dict) and t.get("symbol"):
                 ticker_cache[str(t["symbol"])] = t
 
-        # Liquidity + activity ranking
         ranked: list[tuple[float, float, str]] = []
         for symbol in all_symbols:
             t = ticker_cache.get(symbol, {})
@@ -112,14 +117,12 @@ class MarketScanner:
                 continue
             ranked.append((turnover, move, symbol))
 
-        # Prefer higher turnover, then stronger 24h move
         ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
         symbols = [s for _, _, s in ranked]
         if self.settings.scan_top_n > 0:
             symbols = symbols[: self.settings.scan_top_n]
 
         if not symbols:
-            # Fallback if filter too strict
             logger.warning("Liquidity filter removed all symbols — falling back to full list")
             symbols = all_symbols
             if self.settings.scan_top_n > 0:
@@ -138,6 +141,19 @@ class MarketScanner:
             self.settings.scan_mode,
             tfs,
             self.settings.max_workers,
+        )
+        RUNTIME.update(
+            phase="scanning",
+            cycle=self._cycle,
+            mode=self.settings.scan_mode,
+            min_confidence=self.settings.min_confidence,
+            total_market=total_all,
+            scan_target=total,
+            done=0,
+            signals_this_cycle=0,
+            cycle_started_at=time.time(),
+            waiting_until=0.0,
+            last_error="",
         )
         self._status(
             f"🔎 Fast scan started\n"
@@ -168,6 +184,7 @@ class MarketScanner:
             for fut in as_completed(futures):
                 symbol = futures[fut]
                 done += 1
+                RUNTIME.update(done=done, last_symbol=symbol)
                 try:
                     report = fut.result()
                 except Exception as exc:  # noqa: BLE001
@@ -180,6 +197,10 @@ class MarketScanner:
                 results.append(report)
                 if self._should_alert(report):
                     actionable += 1
+                    RUNTIME.update(
+                        signals_this_cycle=actionable,
+                        last_signal=f"{report.symbol} {report.verdict.value} {report.confidence:.1f}%",
+                    )
                     text = format_report(report)
                     logger.info(
                         "ALERT %s %s conf=%.1f",
@@ -197,6 +218,12 @@ class MarketScanner:
                         report.message,
                     )
 
+                near = sorted(results, key=lambda r: r.confidence, reverse=True)[:3]
+                RUNTIME.update(
+                    signals_this_cycle=actionable,
+                    closest=[f"{r.symbol}: {r.confidence:.1f}% ({r.verdict.value})" for r in near],
+                )
+
                 if done % every == 0 or done == total:
                     self._status(
                         f"⏳ Progress: {done}/{total} pairs\n"
@@ -209,14 +236,15 @@ class MarketScanner:
             reverse=True,
         )[:3]
         near_lines = [
-            f"• {r.symbol}: {r.confidence:.1f}% ({r.verdict.value})" for r in near
-        ] or ["• none"]
+            f"{r.symbol}: {r.confidence:.1f}% ({r.verdict.value})" for r in near
+        ] or ["none"]
+        RUNTIME.update(closest=near_lines, done=total, signals_this_cycle=actionable)
 
         self._status(
             f"✅ Scan finished\n"
             f"Checked: {len(results)}/{total}\n"
             f"Signals sent: {actionable}\n"
-            f"Closest (not enough yet):\n" + "\n".join(near_lines)
+            f"Closest (not enough yet):\n" + "\n".join(f"• {x}" for x in near_lines)
         )
         return results
 
@@ -230,11 +258,12 @@ class MarketScanner:
         if not self.telegram.enabled:
             logger.warning("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing — alerts print to console")
         else:
-            # One short online ping only (no scan spam when TELEGRAM_STATUS=false)
+            self.telegram.start_command_listener(RUNTIME.format_message)
             self.telegram.send(
                 "✅ MEXC scanner ONLINE\n"
                 f"Alerts only on trade signals (≥{self.settings.min_confidence}%)\n"
-                "Status spam: OFF | Quality filters: ON"
+                "Type status in this chat anytime for live scan details.\n"
+                "Type help for commands."
             )
         while True:
             self._cycle += 1
@@ -243,10 +272,12 @@ class MarketScanner:
                 self.run_scan()
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Scan cycle failed: %s", exc)
+                RUNTIME.update(phase="error", last_error=str(exc))
                 self.telegram.send(f"⚠️ MEXC scanner error: {exc}")
             elapsed = time.time() - started
             sleep_for = max(5, self.settings.scan_interval_seconds - int(elapsed))
             logger.info("Cycle done in %.1fs — sleeping %ss", elapsed, sleep_for)
+            RUNTIME.update(phase="waiting", waiting_until=time.time() + sleep_for)
             self._status(
                 f"😴 Waiting {sleep_for // 60}m {sleep_for % 60}s until next scan\n"
                 f"Cycle #{self._cycle} finished in {int(elapsed)}s\n"
