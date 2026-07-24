@@ -27,6 +27,17 @@ class TelegramAlerter:
         self._stop = threading.Event()
         self._base = f"https://api.telegram.org/bot{self.bot_token}" if self.bot_token else ""
 
+    def get_me(self) -> dict:
+        if not self.enabled:
+            return {}
+        try:
+            resp = requests.get(f"{self._base}/getMe", timeout=15)
+            if resp.ok:
+                return resp.json().get("result", {})
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("getMe failed: %s", exc)
+        return {}
+
     def send(self, text: str, parse_mode: str | None = None) -> bool:
         if not self.enabled:
             logger.warning("Telegram not configured — printing alert to console instead")

@@ -259,11 +259,14 @@ class MarketScanner:
             logger.warning("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing — alerts print to console")
         else:
             self.telegram.start_command_listener(RUNTIME.format_message)
+            me = self.telegram.get_me()
+            bot_name = me.get("username") or "your_futures_bot"
             self.telegram.send(
-                "✅ MEXC scanner ONLINE\n"
+                "✅ MEXC FUTURES scanner ONLINE\n"
+                f"Bot: @{bot_name}\n"
                 f"Alerts only on trade signals (≥{self.settings.min_confidence}%)\n"
-                "Type status in this chat anytime for live scan details.\n"
-                "Type help for commands."
+                f"Open @{bot_name} and type: status\n"
+                "(Do not type status in your spot/NFT bot chat)"
             )
         while True:
             self._cycle += 1

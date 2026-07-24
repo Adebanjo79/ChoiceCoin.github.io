@@ -51,10 +51,51 @@ def main() -> int:
         action="store_true",
         help="Send a test message to Telegram and exit",
     )
+    parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="Check .env, MEXC API, and Telegram in one go",
+    )
     args = parser.parse_args()
     setup_logging(settings.log_level)
 
     scanner = MarketScanner(settings)
+
+    if args.diagnose:
+        import requests
+        from pathlib import Path as P
+
+        print("=== MEXC FUTURES BOT DIAGNOSE ===")
+        env_path = P(".env")
+        print(f"1) .env exists: {env_path.exists()}")
+        print(f"2) Token set: {bool(settings.telegram_bot_token)} | Chat ID: {settings.telegram_chat_id!r}")
+        print(f"3) Min confidence: {settings.min_confidence} | mode: {settings.scan_mode}")
+
+        me = scanner.telegram.get_me()
+        if me:
+            print(f"4) Telegram bot OK: @{me.get('username')} ({me.get('first_name')})")
+        else:
+            print("4) Telegram bot FAILED — token wrong or network blocked")
+            return 1
+
+        scanner.telegram._delete_webhook()
+        sent = scanner.telegram.send(
+            f"✅ FUTURES bot diagnose OK\nBot: @{me.get('username')}\n"
+            "If you see this, open THIS bot chat and type: status"
+        )
+        print(f"5) Test message sent: {sent}")
+
+        try:
+            tick = scanner.client.get_ticker("BTC_USDT")
+            price = tick.get("lastPrice") if isinstance(tick, dict) else None
+            print(f"6) MEXC Futures API OK | BTC lastPrice={price}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"6) MEXC Futures API FAILED: {exc}")
+            return 1
+
+        print("=== DONE ===")
+        print("Next: python main.py   then type status in THIS bot chat only")
+        return 0 if sent else 1
 
     if args.test_telegram:
         ok = scanner.telegram.send(
