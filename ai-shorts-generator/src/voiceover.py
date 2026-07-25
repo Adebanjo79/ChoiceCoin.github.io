@@ -29,19 +29,47 @@ def _full_script(scenes: List[Scene] | None = None) -> str:
 
 
 def generate_voiceover(out_path: Path | None = None) -> Path:
-    """Generate voiceover.mp3 via ElevenLabs Adam, or edge-tts in demo mode."""
+    """Generate voiceover.mp3 via ElevenLabs Adam, or edge-tts in demo mode.
+
+    Builds a timeline-aligned mix: each scene's dialogue starts at that scene's
+    offset so VO spans the full Short instead of finishing early.
+    """
     out_path = out_path or (OUTPUT_DIR / "voiceover.mp3")
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    text = _full_script()
 
-    if ELEVENLABS_API_KEY and not DEMO_MODE:
-        _elevenlabs_tts(text, out_path)
-    else:
-        log.warning("Using edge-tts fallback (set ELEVENLABS_API_KEY for Adam).")
-        asyncio.run(_edge_tts(text, out_path))
+    scene_paths = generate_scene_voiceovers()
+    _mix_scene_voiceovers(scene_paths, out_path)
 
     log.info("Voiceover written: %s", out_path)
     return out_path
+
+
+def _mix_scene_voiceovers(scene_paths: List[Path], out_path: Path) -> None:
+    """Place each scene VO at its scene start time → single voiceover.mp3."""
+    import subprocess
+    from src.scenes import SCENES
+
+    # Build ffmpeg amix with adelay per scene
+    inputs: list[str] = []
+    filters: list[str] = []
+    for i, (path, scene) in enumerate(zip(scene_paths, SCENES)):
+        inputs.extend(["-i", str(path)])
+        delay_ms = int(sum(s.duration for s in SCENES[:i]) * 1000)
+        # adelay wants ms per channel
+        filters.append(f"[{i}:a]adelay={delay_ms}|{delay_ms},volume=1.0[a{i}]")
+    mix_inputs = "".join(f"[a{i}]" for i in range(len(scene_paths)))
+    total = sum(s.duration for s in SCENES)
+    filter_complex = ";".join(filters) + (
+        f";{mix_inputs}amix=inputs={len(scene_paths)}:duration=longest:normalize=0,"
+        f"apad=whole_dur={total:.3f}"
+    )
+    cmd = [
+        "ffmpeg", "-y", *inputs,
+        "-filter_complex", filter_complex,
+        "-t", f"{total:.3f}",
+        str(out_path),
+    ]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _elevenlabs_tts(text: str, out_path: Path) -> None:
@@ -148,14 +176,20 @@ def build_word_timings(
 
 
 def generate_scene_voiceovers(out_dir: Path | None = None) -> List[Path]:
-    """Optional per-scene VO files for tighter A/V sync."""
+    """Per-scene VO files for timeline-aligned mix."""
     out_dir = out_dir or (OUTPUT_DIR / "vo_scenes")
     out_dir.mkdir(parents=True, exist_ok=True)
     paths: List[Path] = []
+    use_eleven = bool(ELEVENLABS_API_KEY) and not DEMO_MODE
+    if not use_eleven:
+        log.warning("Using edge-tts fallback (set ELEVENLABS_API_KEY for Adam).")
     for scene in SCENES:
         path = out_dir / f"scene_{scene.id:02d}.mp3"
         text = " ".join(scene.dialogue)
-        if ELEVENLABS_API_KEY and not DEMO_MODE:
+        if path.exists() and path.stat().st_size > 1000:
+            paths.append(path)
+            continue
+        if use_eleven:
             _elevenlabs_tts(text, path)
         else:
             asyncio.run(_edge_tts(text, path))
