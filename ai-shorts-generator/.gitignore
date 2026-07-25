@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+output/clips/
+output/*.mp4
+output/*.tmp.mp4
+output/vo_scenes/
+*.half.mp4
+.DS_Store
