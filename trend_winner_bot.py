@@ -60,8 +60,12 @@ CATEGORIES = {
 
 CSV_PATH = "trend_winners.csv"
 SLEEP_BETWEEN_PAGES = 3
-SLEEP_BETWEEN_TRENDS = 5
+SLEEP_BETWEEN_TRENDS = 8  # Google Trends rate-limits aggressively
 MAX_ITEMS_PER_SEARCH = 20
+
+# If Google Trends returns 429, skip further trend calls for this run
+_TRENDS_RATE_LIMITED = False
+_TRENDS_CACHE = {}
 
 
 # =============================================================================
@@ -315,8 +319,20 @@ def get_trend_change(keyword):
     """
     Check Google Trends (UK, last ~90 days) and return % change
     from first half of the window to the second half.
+
+    If Google rate-limits (429), we stop calling Trends for the rest of
+    this run so the bot can finish instead of hanging on retries.
     """
+    global _TRENDS_RATE_LIMITED
+
     if not keyword:
+        return 0.0
+
+    if keyword in _TRENDS_CACHE:
+        return _TRENDS_CACHE[keyword]
+
+    if _TRENDS_RATE_LIMITED:
+        print(f"  Trends skipped (rate-limited earlier): {keyword}")
         return 0.0
 
     headers = {
@@ -327,41 +343,59 @@ def get_trend_change(keyword):
         )
     }
 
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             pytrends = TrendReq(
                 hl="en-GB",
                 tz=0,
-                retries=1,
-                backoff_factor=0.5,
+                retries=0,  # don't let urllib3 hammer Google
+                backoff_factor=0.1,
                 requests_args={"headers": headers},
             )
             pytrends.build_payload([keyword], timeframe="today 3-m", geo="GB")
             df = pytrends.interest_over_time()
-            time.sleep(SLEEP_BETWEEN_TRENDS)  # avoid rate limits / blocks
+            time.sleep(SLEEP_BETWEEN_TRENDS)
 
             if df is None or df.empty or keyword not in df.columns:
+                _TRENDS_CACHE[keyword] = 0.0
                 return 0.0
 
             series = df[keyword].astype(float)
             mid = len(series) // 2
             if mid == 0:
+                _TRENDS_CACHE[keyword] = 0.0
                 return 0.0
 
             first_avg = float(series.iloc[:mid].mean())
             second_avg = float(series.iloc[mid:].mean())
 
             if first_avg <= 0:
-                return 100.0 if second_avg > 0 else 0.0
+                change = 100.0 if second_avg > 0 else 0.0
+            else:
+                change = round(((second_avg - first_avg) / first_avg) * 100.0, 2)
 
-            change = ((second_avg - first_avg) / first_avg) * 100.0
-            return round(change, 2)
+            _TRENDS_CACHE[keyword] = change
+            return change
         except Exception as e:
-            wait = 15 * (attempt + 1)
-            print(f"  Trends error for '{keyword}' (try {attempt + 1}/3): {e}")
-            print(f"  Waiting {wait}s before retry...")
-            time.sleep(wait)
+            err = str(e).lower()
+            is_rate_limit = "429" in err or "too many" in err or "sorry" in err
+            print(f"  Trends error for '{keyword}' (try {attempt + 1}/2): {e}")
 
+            if is_rate_limit:
+                _TRENDS_RATE_LIMITED = True
+                print(
+                    "  Google Trends rate-limited this IP. "
+                    "Skipping remaining Trends calls for this run "
+                    "(sold/profit filters still apply)."
+                )
+                _TRENDS_CACHE[keyword] = 0.0
+                return 0.0
+
+            if attempt == 0:
+                print("  Waiting 10s before one retry...")
+                time.sleep(10)
+
+    _TRENDS_CACHE[keyword] = 0.0
     return 0.0
 
 
