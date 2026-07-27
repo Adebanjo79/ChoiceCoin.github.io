@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
 trend_winner_bot.py
-Find dropshipping product winners on eBay UK using Best Selling-style
-search results, Google Trends, and simple profit filters.
-Sends top results to Telegram. Runs Mon/Wed/Fri at 09:00.
+
+Source real dropshipping product ideas from:
+  - eBay UK (search results with real sold badges)
+  - Amazon UK Best Sellers (category charts)
+
+Filters out junk (business-for-sale, "100k sold" title spam, crazy prices).
+Scores Sold %, Confidence %, optional Google Trends.
+Telegram: /status /run | Schedule: Mon/Wed/Fri 09:00
 """
 
 import math
@@ -20,7 +25,6 @@ import schedule
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from pytrends.request import TrendReq
-from urllib3.util.retry import Retry
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -28,51 +32,80 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+from urllib3.util.retry import Retry
 from webdriver_manager.chrome import ChromeDriverManager
 
-# Load secrets from .env (same folder as this script)
 load_dotenv()
 
 # =============================================================================
-# CONFIG — set these in a .env file (do not hardcode secrets here)
+# CONFIG
 # =============================================================================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 EBAY_FEE_RATE = 0.13
-SHIPPING_BUFFER = 2.0  # flat £2 buffer
-ALI_PRICE_RATIO = 0.25  # estimate AliExpress cost as 25% of eBay price
+SHIPPING_BUFFER = 2.0
+ALI_PRICE_RATIO = 0.25  # estimate; replace with real Ali scrape later
 
-# Filters (loosened slightly so more realistic winners appear)
+# Dropship-friendly money filters
 MIN_SOLD = 100
 MIN_PROFIT = 5.0
-MIN_MARGIN = 0.40  # 40%
-MIN_TREND_CHANGE = 10.0  # %
-# If Google Trends is rate-limited, do not block winners on trend %
+MIN_MARGIN = 0.35  # 35%
+MIN_PRICE = 4.0
+MAX_PRICE = 79.0  # skip business sales / luxury junk
+MIN_TREND_CHANGE = 0.0  # Trends is a bonus, not a hard gate
 TREND_REQUIRED_WHEN_LIMITED = 0.0
 
-# Also track mega-sellers (100k+ sold)
 MEGA_SOLD_THRESHOLD = 100_000
+# eBay often caps public badges around 10,000+; treat higher as suspicious
+MAX_TRUSTED_EBAY_SOLD_BADGE = 20_000
 
-# Category searches that surface "Best Selling" style results with sold counts
-CATEGORIES = {
-    "Car Accessories": ["car accessories", "car phone holder"],
-    "Pet Supplies": ["pet supplies", "dog toys"],
-    "Home": ["home decor", "led strip lights"],
-    # Extra: trending / viral products that often show 100k+ sold
-    "Trending 100k+": ["100000+ sold", "100k sold", "best seller"],
+# Real product searches (NOT "100k sold" keyword spam)
+EBAY_SEARCHES = {
+    "Car Accessories": [
+        "car phone holder",
+        "car organisers",
+        "car LED lights",
+    ],
+    "Pet Supplies": [
+        "dog toys chew",
+        "cat litter mat",
+        "pet grooming brush",
+    ],
+    "Home": [
+        "led strip lights",
+        "kitchen organiser",
+        "storage organiser",
+    ],
 }
+
+# Amazon UK Best Seller category pages
+AMAZON_BESTSELLERS = {
+    "Car Accessories": "https://www.amazon.co.uk/gp/bestsellers/automotive/",
+    "Pet Supplies": "https://www.amazon.co.uk/gp/bestsellers/pet-supplies/",
+    "Home": "https://www.amazon.co.uk/gp/bestsellers/kitchen/",
+}
+
+# Title junk that is almost never good dropshipping inventory
+JUNK_TITLE_RE = re.compile(
+    r"("
+    r"business\s+for\s+sale|for\s+sale\s+business|with\s+proof|"
+    r"excellent\s+opportunity|wholesale\s+lot|job\s+lot|"
+    r"pdf\b|ebook\b|download\b|course\b|coaching\b|"
+    r"100\s*k\+?\s*sold|100,?000\+?\s*sold|100000\+?\s*sold|"
+    r"over\s+£?\s*100\s*k\s*sold"
+    r")",
+    re.I,
+)
 
 CSV_PATH = "trend_winners.csv"
 SLEEP_BETWEEN_PAGES = 3
-SLEEP_BETWEEN_TRENDS = 8  # Google Trends rate-limits aggressively
-MAX_ITEMS_PER_SEARCH = 20
+SLEEP_BETWEEN_TRENDS = 8
+MAX_ITEMS_PER_SEARCH = 24
+MAX_AMAZON_ITEMS = 20
 
-# If Google Trends returns 429, skip further trend calls for this run
 _TRENDS_RATE_LIMITED = False
 _TRENDS_CACHE = {}
-
-# Shared runtime status for /status and /run
 _RUN_LOCK = threading.Lock()
 BOT_STATUS = {
     "running": False,
@@ -84,11 +117,11 @@ BOT_STATUS = {
     "last_trends_limited": False,
 }
 
+
 # =============================================================================
-# Selenium helper
+# Browser
 # =============================================================================
 def make_driver():
-    """Create a headless Chrome driver with light anti-bot options."""
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
@@ -102,6 +135,7 @@ def make_driver():
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
+    options.add_argument("--lang=en-GB")
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     driver.execute_cdp_cmd(
@@ -111,9 +145,14 @@ def make_driver():
     return driver
 
 
-def accept_cookies(driver):
-    """Click the GDPR accept button if it appears."""
-    for sel in ("#gdpr-banner-accept", "button#consent-banner-btn-accept"):
+def accept_cookies(driver, selectors=None):
+    selectors = selectors or (
+        "#gdpr-banner-accept",
+        "button#consent-banner-btn-accept",
+        "#sp-cc-accept",
+        "input#sp-cc-accept",
+    )
+    for sel in selectors:
         try:
             buttons = driver.find_elements(By.CSS_SELECTOR, sel)
             if buttons:
@@ -124,22 +163,19 @@ def accept_cookies(driver):
             continue
 
 
-def warm_up(driver):
-    """Open eBay UK homepage first so search pages load properly."""
-    print("Warming up eBay UK session...")
+def warm_up_ebay(driver):
+    print("Warming up eBay UK...")
     driver.get("https://www.ebay.co.uk/")
     time.sleep(SLEEP_BETWEEN_PAGES)
     accept_cookies(driver)
 
 
 # =============================================================================
-# Parsing helpers
+# Parsers / filters
 # =============================================================================
 def parse_price(text):
-    """Extract a float price from strings like '£12.99' or 'GBP 12.99'."""
     if not text:
         return None
-    # Prefer the first standalone price (ignore ranges like £10 to £20 by taking first)
     match = re.search(r"[£$]?([\d,]+(?:\.\d+)?)", text.replace("\xa0", " "))
     if not match:
         return None
@@ -150,15 +186,10 @@ def parse_price(text):
 
 
 def parse_sold(text):
-    """
-    Parse sold counts like '100+ sold', '1.2K sold', '100,000+ sold', '100K+ sold'.
-    Returns an integer estimate (lower bound).
-    """
+    """Parse sold badges like '713+ sold', '1.2K sold', '10,000+ sold'."""
     if not text:
         return 0
     text = text.strip().lower()
-
-    # Keep commas out for numeric parse, but detect k/m first on original-ish text
     compact = text.replace(",", "").replace(" ", "")
 
     def _to_float(num_str):
@@ -187,19 +218,10 @@ def parse_sold(text):
         if value is not None:
             return int(value)
 
-    # Fallback with spaces: "100 000+ sold" / "100,000+ sold"
-    match = re.search(r"(\d[\d,\.\s]*)\+?\s*sold", text)
-    if match:
-        digits = re.sub(r"[^\d.]", "", match.group(1))
-        value = _to_float(digits)
-        if value is not None:
-            return int(value)
-
     return 0
 
 
 def clean_product_name(title):
-    """Shorten title for Google Trends (first ~5 meaningful words)."""
     if not title:
         return ""
     title = re.sub(r"Opens in a new window or tab", "", title, flags=re.I)
@@ -209,112 +231,114 @@ def clean_product_name(title):
     return " ".join(keep) if keep else " ".join(words[:5])
 
 
-def extract_sold_text(card):
-    """Find sold-count text inside a result card."""
-    for row in card.select(".s-card__attribute-row, .s-card__caption, span, div"):
-        text = row.get_text(" ", strip=True)
-        if re.search(r"\d.*sold", text, re.I) and len(text) < 40:
-            return text
-    blob = card.get_text(" ", strip=True)
-    match = re.search(r"[\d.,]+\s*[km]?\+?\s*sold", blob, re.I)
-    return match.group(0) if match else ""
+def is_junk_title(title):
+    """Reject business sales and fake '100k sold' title spam."""
+    if not title:
+        return True
+    if JUNK_TITLE_RE.search(title):
+        return True
+    # Titles that are mainly marketing claims
+    if re.search(r"\b(opportunity|franchise|turnkey)\b", title, re.I):
+        return True
+    return False
 
 
-# =============================================================================
-# Scrape eBay UK
-# =============================================================================
-def search_ebay(driver, query):
+def extract_ebay_sold_badge(card):
     """
-    Search eBay UK via the homepage search box (more reliable than deep links)
-    and return parsed listing cards.
+    ONLY read sold counts from badge/attribute rows — never from the title.
+    This stops '100K Sold' title spam from becoming Sold=100000.
     """
-    print(f"  Searching: {query}")
-    items_html = []
-
-    try:
-        driver.get("https://www.ebay.co.uk/")
-        time.sleep(2)
-        accept_cookies(driver)
-
-        box = driver.find_element(By.CSS_SELECTOR, "#gh-ac")
-        box.clear()
-        box.send_keys(query)
-        box.send_keys(Keys.ENTER)
-        time.sleep(SLEEP_BETWEEN_PAGES)
-
-        # Prefer Best Match / popularity order (sold badges show up here)
-        soup = BeautifulSoup(driver.page_source, "lxml")
-        cards = soup.select("li.s-card") or soup.select(".s-card") or soup.select("li.s-item")
-        print(f"    cards found: {len(cards)}")
-        items_html = cards[:MAX_ITEMS_PER_SEARCH]
-    except Exception as e:
-        print(f"    Search error for '{query}': {e}")
-
-    return items_html
+    for sel in (
+        ".s-card__attribute-row",
+        ".s-item__hotness",
+        ".s-item__quantitySold",
+        ".s-item__caption",
+        ".su-card-container__attributes",
+    ):
+        for row in card.select(sel):
+            text = row.get_text(" ", strip=True)
+            if re.search(r"\d.*sold", text, re.I) and len(text) < 40:
+                # Ignore rows that look like title fragments
+                if "opportunity" in text.lower() or "business" in text.lower():
+                    continue
+                return text
+    return ""
 
 
-def parse_card(card, category_name):
-    """Pull Title, Price, Sold Count, Link from one result card."""
-    title_el = card.select_one(".s-card__title, .s-item__title, [role='heading']")
-    price_el = card.select_one(".s-card__price, .s-item__price")
-    link_el = card.select_one("a[href*='/itm/'], a.s-card__link, a.s-item__link")
+def estimate_ali_price(ebay_price):
+    """
+    Estimate AliExpress cost as 25% of eBay price.
 
-    title = title_el.get_text(" ", strip=True) if title_el else ""
-    title = re.sub(r"Opens in a new window or tab", "", title, flags=re.I).strip()
-    if not title or title.lower() == "shop on ebay":
-        return None
-
-    price = parse_price(price_el.get_text(" ", strip=True) if price_el else "")
-    sold = parse_sold(extract_sold_text(card))
-    link = ""
-    if link_el and link_el.has_attr("href"):
-        link = link_el["href"].split("?")[0]
-
-    if sold < MIN_SOLD or price is None or not link:
-        return None
-
-    return {
-        "Category": category_name,
-        "Title": title,
-        "Price": price,
-        "Sold": sold,
-        "Link": link,
-        "Mega_Seller": sold >= MEGA_SOLD_THRESHOLD,
-    }
+    TODO: Replace with real Aliexpress scraping:
+      scrape_aliexpress_price(product_title) -> float
+    """
+    return round(ebay_price * ALI_PRICE_RATIO, 2)
 
 
-def scrape_all_categories(driver):
-    """Scrape all configured categories / trending searches."""
-    all_items = []
-    for category_name, queries in CATEGORIES.items():
-        print(f"\n[{category_name}]")
-        for query in queries:
-            cards = search_ebay(driver, query)
-            kept = 0
-            for card in cards:
-                try:
-                    item = parse_card(card, category_name)
-                    if item:
-                        all_items.append(item)
-                        kept += 1
-                except Exception as e:
-                    print(f"    Skip card error: {e}")
-            print(f"    kept with {MIN_SOLD}+ sold: {kept}")
-            time.sleep(SLEEP_BETWEEN_PAGES)
-    return all_items
+def calc_profit_and_margin(ebay_price, ali_price):
+    ebay_fee = ebay_price * EBAY_FEE_RATE
+    profit = ebay_price - ali_price - ebay_fee - SHIPPING_BUFFER
+    margin = (profit / ebay_price) if ebay_price else 0.0
+    return round(profit, 2), round(margin, 4)
+
+
+def calc_sold_percent(sold, max_sold_in_batch):
+    if not max_sold_in_batch or max_sold_in_batch <= 0:
+        return 0.0
+    return round(min(100.0, (float(sold) / float(max_sold_in_batch)) * 100.0), 1)
+
+
+def calc_confidence_percent(
+    sold,
+    profit,
+    margin,
+    trend_change,
+    source="ebay",
+    amazon_rank=None,
+    trends_limited=False,
+):
+    """Ranking confidence 0-100 (not a profit guarantee)."""
+    sold_cap = 10_000  # realistic eBay public badge scale
+    sold_score = min(100.0, (math.log10(max(sold, 1)) / math.log10(sold_cap)) * 100.0)
+
+    profit_score = min(100.0, max(0.0, (profit / 15.0) * 100.0))
+    margin_pct = margin * 100.0 if margin <= 1.5 else float(margin)
+    margin_score = min(100.0, max(0.0, ((margin_pct - 25.0) / 35.0) * 100.0))
+
+    if trends_limited and trend_change <= 0:
+        trend_score = 40.0
+    else:
+        trend_score = min(100.0, max(0.0, (float(trend_change) / 40.0) * 100.0))
+
+    # Amazon bestseller rank bonus (rank 1 = strong)
+    amazon_score = 50.0
+    if amazon_rank:
+        amazon_score = max(20.0, 100.0 - (amazon_rank - 1) * 3.5)
+
+    if source == "amazon":
+        confidence = (
+            0.35 * amazon_score
+            + 0.20 * profit_score
+            + 0.20 * margin_score
+            + 0.25 * trend_score
+        )
+    else:
+        confidence = (
+            0.30 * sold_score
+            + 0.25 * profit_score
+            + 0.20 * margin_score
+            + 0.15 * trend_score
+            + 0.10 * amazon_score
+        )
+    return round(min(100.0, confidence), 1)
 
 
 # =============================================================================
 # Google Trends
 # =============================================================================
 def _patch_pytrends_urllib3():
-    """
-    pytrends still passes method_whitelist= which urllib3 v2 removed.
-    Patch Retry so both old and new kwargs work.
-    """
     if getattr(Retry, "_trend_winner_patched", False):
         return
-
     original_init = Retry.__init__
 
     def patched_init(self, *args, **kwargs):
@@ -332,21 +356,12 @@ _patch_pytrends_urllib3()
 
 
 def get_trend_change(keyword):
-    """
-    Check Google Trends (UK, last ~90 days) and return % change
-    from first half of the window to the second half.
-
-    If Google rate-limits (429), we stop calling Trends for the rest of
-    this run so the bot can finish instead of hanging on retries.
-    """
     global _TRENDS_RATE_LIMITED
 
     if not keyword:
         return 0.0
-
     if keyword in _TRENDS_CACHE:
         return _TRENDS_CACHE[keyword]
-
     if _TRENDS_RATE_LIMITED:
         print(f"  Trends skipped (rate-limited earlier): {keyword}")
         return 0.0
@@ -354,8 +369,7 @@ def get_trend_change(keyword):
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0.0.0 Safari/537.36"
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
     }
 
@@ -364,7 +378,7 @@ def get_trend_change(keyword):
             pytrends = TrendReq(
                 hl="en-GB",
                 tz=0,
-                retries=0,  # don't let urllib3 hammer Google
+                retries=0,
                 backoff_factor=0.1,
                 requests_args={"headers": headers},
             )
@@ -384,7 +398,6 @@ def get_trend_change(keyword):
 
             first_avg = float(series.iloc[:mid].mean())
             second_avg = float(series.iloc[mid:].mean())
-
             if first_avg <= 0:
                 change = 100.0 if second_avg > 0 else 0.0
             else:
@@ -394,21 +407,13 @@ def get_trend_change(keyword):
             return change
         except Exception as e:
             err = str(e).lower()
-            is_rate_limit = "429" in err or "too many" in err or "sorry" in err
             print(f"  Trends error for '{keyword}' (try {attempt + 1}/2): {e}")
-
-            if is_rate_limit:
+            if "429" in err or "too many" in err or "sorry" in err:
                 _TRENDS_RATE_LIMITED = True
-                print(
-                    "  Google Trends rate-limited this IP. "
-                    "Skipping remaining Trends calls for this run "
-                    "(sold/profit filters still apply)."
-                )
+                print("  Google Trends rate-limited. Continuing without hard trend gate.")
                 _TRENDS_CACHE[keyword] = 0.0
                 return 0.0
-
             if attempt == 0:
-                print("  Waiting 10s before one retry...")
                 time.sleep(10)
 
     _TRENDS_CACHE[keyword] = 0.0
@@ -416,138 +421,249 @@ def get_trend_change(keyword):
 
 
 # =============================================================================
-# Profit math
+# eBay scrape
 # =============================================================================
-def estimate_ali_price(ebay_price):
-    """
-    Estimate Aliexpress cost as 25% of eBay price.
-
-    TODO: Replace this estimate with real Aliexpress scraping.
-    Suggested place to add real scraping:
-      - Search Aliexpress for the product title
-      - Parse the lowest / average supplier price
-      - Use that value instead of ebay_price * 0.25
-    Example entry point: scrape_aliexpress_price(product_title) -> float
-    """
-    return round(ebay_price * ALI_PRICE_RATIO, 2)
-
-
-def calc_profit_and_margin(ebay_price, ali_price):
-    """Profit = Ebay - Ali - Ebay_Fee_13% - 2; Margin = Profit / Ebay."""
-    ebay_fee = ebay_price * EBAY_FEE_RATE
-    profit = ebay_price - ali_price - ebay_fee - SHIPPING_BUFFER
-    margin = (profit / ebay_price) if ebay_price else 0.0
-    return round(profit, 2), round(margin, 4)
+def search_ebay(driver, query):
+    print(f"  eBay search: {query}")
+    try:
+        driver.get("https://www.ebay.co.uk/")
+        time.sleep(2)
+        accept_cookies(driver)
+        box = driver.find_element(By.CSS_SELECTOR, "#gh-ac")
+        box.clear()
+        box.send_keys(query)
+        box.send_keys(Keys.ENTER)
+        time.sleep(SLEEP_BETWEEN_PAGES)
+        soup = BeautifulSoup(driver.page_source, "lxml")
+        cards = soup.select("li.s-card") or soup.select(".s-card") or soup.select("li.s-item")
+        print(f"    cards: {len(cards)}")
+        return cards[:MAX_ITEMS_PER_SEARCH]
+    except Exception as e:
+        print(f"    eBay search error: {e}")
+        return []
 
 
-def calc_sold_percent(sold, max_sold_in_batch):
-    """
-    Sold % = this item's sold count vs the highest sold count in this scrape.
-    100% = strongest seller in the current run.
-    """
-    if not max_sold_in_batch or max_sold_in_batch <= 0:
-        return 0.0
-    return round(min(100.0, (float(sold) / float(max_sold_in_batch)) * 100.0), 1)
+def parse_ebay_card(card, category_name):
+    title_el = card.select_one(".s-card__title, .s-item__title, [role='heading']")
+    price_el = card.select_one(".s-card__price, .s-item__price")
+    link_el = card.select_one("a[href*='/itm/'], a.s-card__link, a.s-item__link")
+
+    title = title_el.get_text(" ", strip=True) if title_el else ""
+    title = re.sub(r"Opens in a new window or tab", "", title, flags=re.I).strip()
+    if not title or title.lower() == "shop on ebay":
+        return None
+    if is_junk_title(title):
+        return None
+
+    price = parse_price(price_el.get_text(" ", strip=True) if price_el else "")
+    sold_text = extract_ebay_sold_badge(card)
+    sold = parse_sold(sold_text)
+
+    # Guard: absurd sold badges are usually spam/misreads
+    if sold > MAX_TRUSTED_EBAY_SOLD_BADGE:
+        print(f"    skip suspicious sold badge ({sold}): {title[:60]}")
+        return None
+
+    link = ""
+    if link_el and link_el.has_attr("href"):
+        link = link_el["href"].split("?")[0]
+
+    if sold < MIN_SOLD or price is None or not link:
+        return None
+    if price < MIN_PRICE or price > MAX_PRICE:
+        return None
+
+    return {
+        "Source": "eBay UK",
+        "Category": category_name,
+        "Title": title,
+        "Price": price,
+        "Sold": sold,
+        "Amazon_Rank": None,
+        "Link": link,
+        "Mega_Seller": sold >= MEGA_SOLD_THRESHOLD,
+    }
 
 
-def calc_confidence_percent(sold, profit, margin, trend_change, trends_limited=False):
-    """
-    Confidence % (0-100) from sold strength, profit, margin, and trend.
-    This is a ranking score, not a guarantee of profit.
-    """
-    # Sold strength on a log scale (100 sold ~ low, 100k sold ~ 100)
-    sold_score = min(100.0, (math.log10(max(sold, 1)) / math.log10(MEGA_SOLD_THRESHOLD)) * 100.0)
-
-    # Profit: £5 ~ 33, £15+ ~ 100
-    profit_score = min(100.0, max(0.0, (profit / 15.0) * 100.0))
-
-    # Margin stored as fraction here
-    margin_pct = margin * 100.0 if margin <= 1.5 else float(margin)
-    margin_score = min(100.0, max(0.0, ((margin_pct - 30.0) / 30.0) * 100.0))
-
-    # Trend: if Trends was blocked, use a neutral mid score instead of punishing
-    if trends_limited and trend_change <= 0:
-        trend_score = 45.0
-    else:
-        trend_score = min(100.0, max(0.0, (float(trend_change) / 50.0) * 100.0))
-
-    confidence = (
-        0.30 * sold_score
-        + 0.25 * profit_score
-        + 0.20 * margin_score
-        + 0.25 * trend_score
-    )
-    return round(confidence, 1)
+def scrape_ebay(driver):
+    items = []
+    for category, queries in EBAY_SEARCHES.items():
+        print(f"\n[eBay / {category}]")
+        for query in queries:
+            for card in search_ebay(driver, query):
+                try:
+                    item = parse_ebay_card(card, category)
+                    if item:
+                        items.append(item)
+                except Exception as e:
+                    print(f"    skip card: {e}")
+            time.sleep(SLEEP_BETWEEN_PAGES)
+    return items
 
 
 # =============================================================================
-# Telegram helpers + commands
+# Amazon UK Best Sellers
+# =============================================================================
+def scrape_amazon_bestsellers(driver):
+    items = []
+    print("\nWarming up Amazon UK...")
+    try:
+        driver.get("https://www.amazon.co.uk/")
+        time.sleep(3)
+        accept_cookies(driver)
+    except Exception as e:
+        print(f"Amazon warm-up error: {e}")
+
+    for category, url in AMAZON_BESTSELLERS.items():
+        print(f"\n[Amazon / {category}] {url}")
+        try:
+            driver.get(url)
+            time.sleep(SLEEP_BETWEEN_PAGES + 1)
+            accept_cookies(driver)
+            soup = BeautifulSoup(driver.page_source, "lxml")
+
+            cards = (
+                soup.select("div#gridItemRoot")
+                or soup.select("div.zg-grid-general-faceout")
+                or soup.select("div[id^='p13n-asin']")
+                or soup.select("li.zg-item-immersion")
+            )
+            print(f"  cards: {len(cards)}")
+
+            for idx, card in enumerate(cards[:MAX_AMAZON_ITEMS], start=1):
+                try:
+                    title_el = (
+                        card.select_one("div._cDEzb_p13n-sc-css-line-clamp-3_g3dy1")
+                        or card.select_one(".p13n-sc-truncate")
+                        or card.select_one("a.a-link-normal span div")
+                        or card.select_one("img.a-dynamic-image")
+                    )
+                    if title_el and title_el.name == "img":
+                        title = (title_el.get("alt") or "").strip()
+                    else:
+                        title = title_el.get_text(" ", strip=True) if title_el else ""
+
+                    if not title:
+                        # fallback: any product link text / img alt
+                        img = card.select_one("img")
+                        title = (img.get("alt") if img else "") or ""
+                    title = title.strip()
+                    if not title or is_junk_title(title):
+                        continue
+
+                    price_el = (
+                        card.select_one("span._cDEzb_p13n-sc-price_3mJ9Z")
+                        or card.select_one(".p13n-sc-price")
+                        or card.select_one(".a-price .a-offscreen")
+                        or card.select_one(".a-color-price")
+                    )
+                    price = parse_price(price_el.get_text(" ", strip=True) if price_el else "")
+
+                    link_el = card.select_one("a.a-link-normal[href*='/dp/'], a[href*='/dp/']")
+                    link = ""
+                    if link_el and link_el.has_attr("href"):
+                        href = link_el["href"]
+                        if href.startswith("/"):
+                            href = "https://www.amazon.co.uk" + href.split("?")[0]
+                        else:
+                            href = href.split("?")[0]
+                        link = href
+
+                    # Reviews count as demand proxy when sold count isn't public
+                    review_el = card.select_one("span.a-size-small") or card.select_one(
+                        "a.a-link-normal .a-size-small"
+                    )
+                    review_text = review_el.get_text(" ", strip=True) if review_el else ""
+                    review_match = re.search(r"([\d,]+)", review_text)
+                    reviews = int(review_match.group(1).replace(",", "")) if review_match else 0
+
+                    if not link or price is None:
+                        continue
+                    if price < MIN_PRICE or price > MAX_PRICE:
+                        continue
+
+                    # Map reviews -> synthetic "sold proxy" for scoring only
+                    sold_proxy = max(reviews, 100)
+
+                    items.append(
+                        {
+                            "Source": "Amazon UK",
+                            "Category": category,
+                            "Title": title,
+                            "Price": price,
+                            "Sold": sold_proxy,  # reviews used as demand proxy
+                            "Amazon_Rank": idx,
+                            "Link": link,
+                            "Mega_Seller": False,
+                            "Reviews": reviews,
+                        }
+                    )
+                except Exception as e:
+                    print(f"  skip amazon card: {e}")
+            time.sleep(SLEEP_BETWEEN_PAGES)
+        except Exception as e:
+            print(f"  Amazon category error: {e}")
+
+    print(f"Amazon items kept: {len(items)}")
+    return items
+
+
+# =============================================================================
+# Telegram
 # =============================================================================
 def send_telegram_message(message):
-    """
-    Send a Telegram message via HTTP API (safe from any thread).
-    Set TELEGRAM_TOKEN and TELEGRAM_CHAT_ID in your .env file.
-    """
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         print("\n[Telegram] Skipping send — set TELEGRAM_TOKEN and TELEGRAM_CHAT_ID in .env")
-        print("--- Message that would be sent ---")
         print(message)
-        print("----------------------------------")
         return False
-
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        # Telegram hard limit ~4096 chars
+        text = message[:4000]
         resp = requests.post(
             url,
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": message,
-                "disable_web_page_preview": False,
-            },
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "disable_web_page_preview": False},
             timeout=30,
         )
         if resp.ok:
             print("[Telegram] Message sent.")
             return True
-        print(f"[Telegram] Failed to send: {resp.status_code} {resp.text[:200]}")
+        print(f"[Telegram] Failed: {resp.status_code} {resp.text[:200]}")
         return False
     except Exception as e:
-        print(f"[Telegram] Failed to send: {e}")
+        print(f"[Telegram] Failed: {e}")
         return False
 
 
 def format_top_results_message(df_top):
-    """Build a simple Telegram message for the top 3 winners."""
-    lines = ["eBay UK Trend Winners\n"]
+    lines = ["Dropship Sources (eBay + Amazon UK)\n"]
     for i, row in enumerate(df_top.itertuples(index=False), start=1):
-        mega = " | 100k+ sold" if getattr(row, "Mega_Seller", False) else ""
         title = str(row.Title)[:80]
+        source = getattr(row, "Source", "eBay UK")
         sold_pct = getattr(row, "Sold_Percent", 0)
         conf = getattr(row, "Confidence", 0)
+        rank = getattr(row, "Amazon_Rank", None)
+        rank_bit = f" | AMZ#{int(rank)}" if rank else ""
+        sold_label = "Reviews~" if source.startswith("Amazon") else "Sold"
         lines.append(
-            f"{i}. {title}\n"
-            f"   Profit: £{row.Profit:.2f} | Trend: {row.Trend_Change}%{mega}\n"
-            f"   Sold: {row.Sold} ({sold_pct}%) | Confidence: {conf}%\n"
+            f"{i}. [{source}] {title}\n"
+            f"   Profit: £{row.Profit:.2f} | Trend: {row.Trend_Change}%{rank_bit}\n"
+            f"   {sold_label}: {row.Sold} ({sold_pct}%) | Confidence: {conf}%\n"
             f"   {row.Link}\n"
         )
     return "\n".join(lines)
 
 
 def _authorized(update: Update) -> bool:
-    """Only allow commands from your TELEGRAM_CHAT_ID."""
-    if not TELEGRAM_CHAT_ID:
+    if not TELEGRAM_CHAT_ID or update.effective_chat is None:
         return False
-    chat = update.effective_chat
-    if chat is None:
-        return False
-    return str(chat.id) == str(TELEGRAM_CHAT_ID)
+    return str(update.effective_chat.id) == str(TELEGRAM_CHAT_ID)
 
 
 def build_status_text() -> str:
-    """Human-readable status for /status."""
     running = "YES — scan in progress" if BOT_STATUS["running"] else "No — idle"
     return (
-        "Trend Winner Bot status\n"
+        "Dropship Source Bot status\n"
         f"Running now: {running}\n"
         f"Bot started: {BOT_STATUS['started_at']}\n"
         f"Last run: {BOT_STATUS['last_run'] or 'never'}\n"
@@ -555,6 +671,7 @@ def build_status_text() -> str:
         f"Last winners: {BOT_STATUS['last_winners'] if BOT_STATUS['last_winners'] is not None else '-'}\n"
         f"Trends limited last run: {BOT_STATUS['last_trends_limited']}\n"
         f"Last error: {BOT_STATUS['last_error'] or 'none'}\n"
+        "Sources: eBay UK + Amazon UK Best Sellers\n"
         "Schedule: Mon/Wed/Fri 09:00\n"
         "Commands: /status /run"
     )
@@ -564,10 +681,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _authorized(update):
         return
     await update.message.reply_text(
-        "Trend Winner Bot is online.\n"
-        "Commands:\n"
-        "/status — bot status\n"
-        "/run — start a scan now"
+        "Dropship Source Bot online.\n"
+        "/status — status\n"
+        "/run — scan eBay + Amazon now"
     )
 
 
@@ -582,37 +698,35 @@ async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _authorized(update):
         await update.message.reply_text("Unauthorized chat.")
         return
-
     if BOT_STATUS["running"] or _RUN_LOCK.locked():
         await update.message.reply_text("A scan is already running. Try /status.")
         return
-
-    await update.message.reply_text("Starting scan now... I'll message you when it finishes.")
+    await update.message.reply_text("Starting eBay + Amazon scan...")
     threading.Thread(target=job, kwargs={"trigger": "/run"}, daemon=True).start()
 
 
 # =============================================================================
-# Main pipeline
+# Pipeline
 # =============================================================================
 def find_winners():
-    """Scrape → trends → profit filter → CSV → Telegram."""
     global _TRENDS_RATE_LIMITED, _TRENDS_CACHE
     _TRENDS_RATE_LIMITED = False
     _TRENDS_CACHE = {}
 
     print("=" * 60)
-    print(f"Trend Winner Bot started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Dropship Source Bot started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
     all_items = []
     driver = None
-
     try:
         driver = make_driver()
-        warm_up(driver)
-        all_items = scrape_all_categories(driver)
+        warm_up_ebay(driver)
+        all_items.extend(scrape_ebay(driver))
+        all_items.extend(scrape_amazon_bestsellers(driver))
     except Exception as e:
         print(f"Driver/scrape error: {e}")
+        BOT_STATUS["last_error"] = str(e)
     finally:
         if driver:
             try:
@@ -621,11 +735,13 @@ def find_winners():
                 pass
 
     empty_cols = [
+        "Source",
         "Category",
         "Title",
         "Price",
         "Sold",
         "Sold_Percent",
+        "Amazon_Rank",
         "Link",
         "Mega_Seller",
         "Ali_Price",
@@ -637,9 +753,8 @@ def find_winners():
     ]
 
     if not all_items:
-        print("No items scraped. Saving empty CSV and finishing.")
         pd.DataFrame(columns=empty_cols).to_csv(CSV_PATH, index=False)
-        BOT_STATUS["last_trends_limited"] = _TRENDS_RATE_LIMITED
+        send_telegram_message("Dropship bot: no products scraped this run.")
         print("Bot Finished. Found 0 winners")
         return 0
 
@@ -653,86 +768,73 @@ def find_winners():
         unique.append(item)
     all_items = unique
 
-    mega_count = sum(1 for i in all_items if i["Mega_Seller"])
     max_sold = max((i["Sold"] for i in all_items), default=0)
-    print(
-        f"\nUnique items with 100+ sold: {len(all_items)} "
-        f"(100k+ sold: {mega_count}, max sold in batch: {max_sold})"
-    )
-
-    # Soften trend gate when Google Trends is blocked mid-run
-    required_trend = (
-        TREND_REQUIRED_WHEN_LIMITED if _TRENDS_RATE_LIMITED else MIN_TREND_CHANGE
-    )
+    print(f"\nUnique sourced products: {len(all_items)} (max demand proxy: {max_sold})")
 
     winners = []
     for item in all_items:
         try:
+            if is_junk_title(item["Title"]):
+                continue
+            if item["Price"] < MIN_PRICE or item["Price"] > MAX_PRICE:
+                continue
+
             ali_price = estimate_ali_price(item["Price"])
-            # TODO(aliexpress): swap estimate_ali_price() for real scrape here
             profit, margin = calc_profit_and_margin(item["Price"], ali_price)
 
-            # Cheap pre-filter before hitting Google Trends
             if item["Sold"] < MIN_SOLD or profit < MIN_PROFIT or margin < MIN_MARGIN:
                 print(
-                    f"skip money filter: {item['Title'][:50]} | "
-                    f"sold={item['Sold']} profit=£{profit} margin={margin * 100:.1f}%"
+                    f"skip: {item['Source']} | {item['Title'][:45]} | "
+                    f"sold/proxy={item['Sold']} profit=£{profit} margin={margin*100:.1f}%"
                 )
                 continue
 
             keyword = clean_product_name(item["Title"])
-            print(
-                f"Trends: {keyword} | sold={item['Sold']} "
-                f"price=£{item['Price']} profit=£{profit}"
-            )
+            print(f"Trends: {keyword} | {item['Source']} | £{item['Price']}")
             trend_change = get_trend_change(keyword)
 
-            # Re-check required trend if rate-limit flipped during this loop
             required_trend = (
                 TREND_REQUIRED_WHEN_LIMITED if _TRENDS_RATE_LIMITED else MIN_TREND_CHANGE
             )
+            if trend_change < required_trend:
+                print(f"  skip trend {trend_change}% < {required_trend}%")
+                continue
 
-            # Keep if: Sold/Profit/Margin pass AND Trend meets current threshold
-            if trend_change >= required_trend:
-                sold_pct = calc_sold_percent(item["Sold"], max_sold)
-                confidence = calc_confidence_percent(
-                    item["Sold"],
-                    profit,
-                    margin,
-                    trend_change,
-                    trends_limited=_TRENDS_RATE_LIMITED,
-                )
-                winners.append(
-                    {
-                        **item,
-                        "Sold_Percent": sold_pct,
-                        "Ali_Price": ali_price,
-                        "Profit": profit,
-                        "Margin": round(margin * 100, 2),  # store as %
-                        "Trend_Change": trend_change,
-                        "Confidence": confidence,
-                        "Trend_Keyword": keyword,
-                    }
-                )
-                print(
-                    f"  WINNER: profit=£{profit} margin={margin * 100:.1f}% "
-                    f"trend={trend_change}% sold%={sold_pct} conf={confidence}% "
-                    f"mega={item['Mega_Seller']}"
-                )
-            else:
-                print(
-                    f"  skip trend: {trend_change}% < {required_trend}% "
-                    f"(limited={_TRENDS_RATE_LIMITED})"
-                )
+            sold_pct = calc_sold_percent(item["Sold"], max_sold)
+            confidence = calc_confidence_percent(
+                item["Sold"],
+                profit,
+                margin,
+                trend_change,
+                source="amazon" if item["Source"].startswith("Amazon") else "ebay",
+                amazon_rank=item.get("Amazon_Rank"),
+                trends_limited=_TRENDS_RATE_LIMITED,
+            )
+
+            winners.append(
+                {
+                    **item,
+                    "Sold_Percent": sold_pct,
+                    "Ali_Price": ali_price,
+                    "Profit": profit,
+                    "Margin": round(margin * 100, 2),
+                    "Trend_Change": trend_change,
+                    "Confidence": confidence,
+                    "Trend_Keyword": keyword,
+                }
+            )
+            print(
+                f"  WINNER [{item['Source']}] conf={confidence}% "
+                f"profit=£{profit} sold%={sold_pct}"
+            )
         except Exception as e:
-            print(f"  Item error: {e}")
-            continue
+            print(f"  item error: {e}")
 
     df = pd.DataFrame(winners)
     if not df.empty:
         df = df.sort_values(
-            by=["Confidence", "Mega_Seller", "Profit", "Trend_Change", "Sold"],
-            ascending=[False, False, False, False, False],
+            by=["Confidence", "Profit", "Sold"],
+            ascending=[False, False, False],
         )
     else:
         df = pd.DataFrame(columns=empty_cols)
@@ -741,10 +843,12 @@ def find_winners():
     print(f"\nSaved {len(df)} winners to {CSV_PATH}")
 
     if not df.empty:
-        top3 = df.head(3)
-        send_telegram_message(format_top_results_message(top3))
+        send_telegram_message(format_top_results_message(df.head(5)))
     else:
-        send_telegram_message("eBay UK Trend Bot: no winners this run.")
+        send_telegram_message(
+            "Dropship bot: no clean winners this run "
+            "(junk filtered / money filters / scrape blocked)."
+        )
 
     BOT_STATUS["last_trends_limited"] = _TRENDS_RATE_LIMITED
     print(f"Bot Finished. Found {len(df)} winners")
@@ -752,9 +856,8 @@ def find_winners():
 
 
 def job(trigger="schedule"):
-    """Scheduled / Telegram / CLI job wrapper with overlap protection."""
     if not _RUN_LOCK.acquire(blocking=False):
-        print("Scan already running — skipping overlapping start.")
+        print("Scan already running — skip.")
         send_telegram_message("Scan already running. Try /status.")
         return
 
@@ -769,17 +872,13 @@ def job(trigger="schedule"):
         print(f"Job failed: {e}")
         BOT_STATUS["last_error"] = str(e)
         BOT_STATUS["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        try:
-            send_telegram_message(f"Trend Winner Bot error: {e}")
-        except Exception:
-            pass
+        send_telegram_message(f"Dropship bot error: {e}")
     finally:
         BOT_STATUS["running"] = False
         _RUN_LOCK.release()
 
 
 def _schedule_loop():
-    """Background thread: Mon/Wed/Fri 09:00."""
     schedule.every().monday.at("09:00").do(job, trigger="schedule")
     schedule.every().wednesday.at("09:00").do(job, trigger="schedule")
     schedule.every().friday.at("09:00").do(job, trigger="schedule")
@@ -790,13 +889,11 @@ def _schedule_loop():
 
 
 def main():
-    """Run Telegram command bot + schedule loop."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         print("Set TELEGRAM_TOKEN and TELEGRAM_CHAT_ID in .env before starting.")
         sys.exit(1)
 
     BOT_STATUS["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     threading.Thread(target=_schedule_loop, daemon=True).start()
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -805,7 +902,7 @@ def main():
     app.add_handler(CommandHandler("run", cmd_run))
 
     send_telegram_message(
-        "Trend Winner Bot is online.\n"
+        "Dropship Source Bot online (eBay + Amazon UK).\n"
         "Commands: /status /run\n"
         "Schedule: Mon/Wed/Fri 09:00"
     )
@@ -814,7 +911,6 @@ def main():
 
 
 if __name__ == "__main__":
-    # `python trend_winner_bot.py once` → single run, no Telegram polling
     if len(sys.argv) > 1 and sys.argv[1] == "once":
         job(trigger="once")
     else:
