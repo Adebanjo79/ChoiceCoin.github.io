@@ -7,6 +7,7 @@ Sends top results to Telegram. Runs Mon/Wed/Fri at 09:00.
 """
 
 import asyncio
+import os
 import re
 import sys
 import time
@@ -15,6 +16,7 @@ from datetime import datetime
 import pandas as pd
 import schedule
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from pytrends.request import TrendReq
 from urllib3.util.retry import Retry
 from selenium import webdriver
@@ -25,11 +27,14 @@ from selenium.webdriver.common.keys import Keys
 from telegram import Bot
 from webdriver_manager.chrome import ChromeDriverManager
 
+# Load secrets from .env (same folder as this script)
+load_dotenv()
+
 # =============================================================================
-# CONFIG — put your real Telegram credentials here
+# CONFIG — set these in a .env file (do not hardcode secrets here)
 # =============================================================================
-TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"  # <-- replace with your bot token
-TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"  # <-- replace with your chat id
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 EBAY_FEE_RATE = 0.13
 SHIPPING_BUFFER = 2.0  # flat £2 buffer
@@ -401,10 +406,10 @@ async def _send_telegram_async(message):
 def send_telegram_message(message):
     """
     Send a Telegram message.
-    Replace TELEGRAM_TOKEN and TELEGRAM_CHAT_ID at the top of this file.
+    Set TELEGRAM_TOKEN and TELEGRAM_CHAT_ID in your .env file.
     """
-    if TELEGRAM_TOKEN == "YOUR_TELEGRAM_BOT_TOKEN" or TELEGRAM_CHAT_ID == "YOUR_CHAT_ID":
-        print("\n[Telegram] Skipping send — set TELEGRAM_TOKEN and TELEGRAM_CHAT_ID first.")
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("\n[Telegram] Skipping send — set TELEGRAM_TOKEN and TELEGRAM_CHAT_ID in .env")
         print("--- Message that would be sent ---")
         print(message)
         print("----------------------------------")
