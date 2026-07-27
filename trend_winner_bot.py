@@ -10,10 +10,12 @@ import asyncio
 import os
 import re
 import sys
+import threading
 import time
 from datetime import datetime
 
 import pandas as pd
+import requests
 import schedule
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -24,7 +26,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from telegram import Bot
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 from webdriver_manager.chrome import ChromeDriverManager
 
 # Load secrets from .env (same folder as this script)
@@ -67,6 +70,17 @@ MAX_ITEMS_PER_SEARCH = 20
 _TRENDS_RATE_LIMITED = False
 _TRENDS_CACHE = {}
 
+# Shared runtime status for /status and /run
+_RUN_LOCK = threading.Lock()
+BOT_STATUS = {
+    "running": False,
+    "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "last_run": None,
+    "last_trigger": None,
+    "last_winners": None,
+    "last_error": None,
+    "last_trends_limited": False,
+}
 
 # =============================================================================
 # Selenium helper
@@ -425,21 +439,11 @@ def calc_profit_and_margin(ebay_price, ali_price):
 
 
 # =============================================================================
-# Telegram
+# Telegram helpers + commands
 # =============================================================================
-async def _send_telegram_async(message):
-    """Internal async send using python-telegram-bot."""
-    bot = Bot(token=TELEGRAM_TOKEN)
-    await bot.send_message(
-        chat_id=TELEGRAM_CHAT_ID,
-        text=message,
-        disable_web_page_preview=False,
-    )
-
-
 def send_telegram_message(message):
     """
-    Send a Telegram message.
+    Send a Telegram message via HTTP API (safe from any thread).
     Set TELEGRAM_TOKEN and TELEGRAM_CHAT_ID in your .env file.
     """
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -450,9 +454,21 @@ def send_telegram_message(message):
         return False
 
     try:
-        asyncio.run(_send_telegram_async(message))
-        print("[Telegram] Message sent.")
-        return True
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        resp = requests.post(
+            url,
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": message,
+                "disable_web_page_preview": False,
+            },
+            timeout=30,
+        )
+        if resp.ok:
+            print("[Telegram] Message sent.")
+            return True
+        print(f"[Telegram] Failed to send: {resp.status_code} {resp.text[:200]}")
+        return False
     except Exception as e:
         print(f"[Telegram] Failed to send: {e}")
         return False
@@ -472,11 +488,73 @@ def format_top_results_message(df_top):
     return "\n".join(lines)
 
 
+def _authorized(update: Update) -> bool:
+    """Only allow commands from your TELEGRAM_CHAT_ID."""
+    if not TELEGRAM_CHAT_ID:
+        return False
+    chat = update.effective_chat
+    if chat is None:
+        return False
+    return str(chat.id) == str(TELEGRAM_CHAT_ID)
+
+
+def build_status_text() -> str:
+    """Human-readable status for /status."""
+    running = "YES — scan in progress" if BOT_STATUS["running"] else "No — idle"
+    return (
+        "Trend Winner Bot status\n"
+        f"Running now: {running}\n"
+        f"Bot started: {BOT_STATUS['started_at']}\n"
+        f"Last run: {BOT_STATUS['last_run'] or 'never'}\n"
+        f"Last trigger: {BOT_STATUS['last_trigger'] or '-'}\n"
+        f"Last winners: {BOT_STATUS['last_winners'] if BOT_STATUS['last_winners'] is not None else '-'}\n"
+        f"Trends limited last run: {BOT_STATUS['last_trends_limited']}\n"
+        f"Last error: {BOT_STATUS['last_error'] or 'none'}\n"
+        "Schedule: Mon/Wed/Fri 09:00\n"
+        "Commands: /status /run"
+    )
+
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _authorized(update):
+        return
+    await update.message.reply_text(
+        "Trend Winner Bot is online.\n"
+        "Commands:\n"
+        "/status — bot status\n"
+        "/run — start a scan now"
+    )
+
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _authorized(update):
+        await update.message.reply_text("Unauthorized chat.")
+        return
+    await update.message.reply_text(build_status_text())
+
+
+async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _authorized(update):
+        await update.message.reply_text("Unauthorized chat.")
+        return
+
+    if BOT_STATUS["running"] or _RUN_LOCK.locked():
+        await update.message.reply_text("A scan is already running. Try /status.")
+        return
+
+    await update.message.reply_text("Starting scan now... I'll message you when it finishes.")
+    threading.Thread(target=job, kwargs={"trigger": "/run"}, daemon=True).start()
+
+
 # =============================================================================
 # Main pipeline
 # =============================================================================
 def find_winners():
     """Scrape → trends → profit filter → CSV → Telegram."""
+    global _TRENDS_RATE_LIMITED, _TRENDS_CACHE
+    _TRENDS_RATE_LIMITED = False
+    _TRENDS_CACHE = {}
+
     print("=" * 60)
     print(f"Trend Winner Bot started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
@@ -514,6 +592,7 @@ def find_winners():
     if not all_items:
         print("No items scraped. Saving empty CSV and finishing.")
         pd.DataFrame(columns=empty_cols).to_csv(CSV_PATH, index=False)
+        BOT_STATUS["last_trends_limited"] = _TRENDS_RATE_LIMITED
         print("Bot Finished. Found 0 winners")
         return 0
 
@@ -593,41 +672,76 @@ def find_winners():
     else:
         send_telegram_message("eBay UK Trend Bot: no winners this run.")
 
+    BOT_STATUS["last_trends_limited"] = _TRENDS_RATE_LIMITED
     print(f"Bot Finished. Found {len(df)} winners")
     return len(df)
 
 
-def job():
-    """Scheduled job wrapper with error handling."""
+def job(trigger="schedule"):
+    """Scheduled / Telegram / CLI job wrapper with overlap protection."""
+    if not _RUN_LOCK.acquire(blocking=False):
+        print("Scan already running — skipping overlapping start.")
+        send_telegram_message("Scan already running. Try /status.")
+        return
+
+    BOT_STATUS["running"] = True
+    BOT_STATUS["last_trigger"] = trigger
+    BOT_STATUS["last_error"] = None
     try:
-        find_winners()
+        winners = find_winners()
+        BOT_STATUS["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        BOT_STATUS["last_winners"] = winners
     except Exception as e:
         print(f"Job failed: {e}")
+        BOT_STATUS["last_error"] = str(e)
+        BOT_STATUS["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             send_telegram_message(f"Trend Winner Bot error: {e}")
         except Exception:
             pass
+    finally:
+        BOT_STATUS["running"] = False
+        _RUN_LOCK.release()
+
+
+def _schedule_loop():
+    """Background thread: Mon/Wed/Fri 09:00."""
+    schedule.every().monday.at("09:00").do(job, trigger="schedule")
+    schedule.every().wednesday.at("09:00").do(job, trigger="schedule")
+    schedule.every().friday.at("09:00").do(job, trigger="schedule")
+    print("Schedule armed: Monday, Wednesday, Friday at 09:00")
+    while True:
+        schedule.run_pending()
+        time.sleep(20)
 
 
 def main():
-    print("Scheduling bot for Monday, Wednesday, Friday at 09:00")
-    schedule.every().monday.at("09:00").do(job)
-    schedule.every().wednesday.at("09:00").do(job)
-    schedule.every().friday.at("09:00").do(job)
+    """Run Telegram command bot + schedule loop."""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Set TELEGRAM_TOKEN and TELEGRAM_CHAT_ID in .env before starting.")
+        sys.exit(1)
 
-    # Run once now so you can test immediately
-    print("Running once now...")
-    job()
+    BOT_STATUS["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    print("Waiting for schedule (Mon/Wed/Fri 09:00). Ctrl+C to stop.")
-    while True:
-        schedule.run_pending()
-        time.sleep(30)
+    threading.Thread(target=_schedule_loop, daemon=True).start()
+
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("run", cmd_run))
+
+    send_telegram_message(
+        "Trend Winner Bot is online.\n"
+        "Commands: /status /run\n"
+        "Schedule: Mon/Wed/Fri 09:00"
+    )
+    print("Telegram bot polling... commands: /status /run")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    # `python trend_winner_bot.py once` → single run, no schedule loop
+    # `python trend_winner_bot.py once` → single run, no Telegram polling
     if len(sys.argv) > 1 and sys.argv[1] == "once":
-        job()
+        job(trigger="once")
     else:
         main()
