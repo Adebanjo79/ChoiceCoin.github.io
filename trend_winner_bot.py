@@ -6,7 +6,7 @@ search results, Google Trends, and simple profit filters.
 Sends top results to Telegram. Runs Mon/Wed/Fri at 09:00.
 """
 
-import asyncio
+import math
 import os
 import re
 import sys
@@ -43,11 +43,13 @@ EBAY_FEE_RATE = 0.13
 SHIPPING_BUFFER = 2.0  # flat £2 buffer
 ALI_PRICE_RATIO = 0.25  # estimate AliExpress cost as 25% of eBay price
 
-# Filters
+# Filters (loosened slightly so more realistic winners appear)
 MIN_SOLD = 100
-MIN_PROFIT = 8.0
+MIN_PROFIT = 5.0
 MIN_MARGIN = 0.40  # 40%
-MIN_TREND_CHANGE = 20.0  # %
+MIN_TREND_CHANGE = 10.0  # %
+# If Google Trends is rate-limited, do not block winners on trend %
+TREND_REQUIRED_WHEN_LIMITED = 0.0
 
 # Also track mega-sellers (100k+ sold)
 MEGA_SOLD_THRESHOLD = 100_000
@@ -438,6 +440,46 @@ def calc_profit_and_margin(ebay_price, ali_price):
     return round(profit, 2), round(margin, 4)
 
 
+def calc_sold_percent(sold, max_sold_in_batch):
+    """
+    Sold % = this item's sold count vs the highest sold count in this scrape.
+    100% = strongest seller in the current run.
+    """
+    if not max_sold_in_batch or max_sold_in_batch <= 0:
+        return 0.0
+    return round(min(100.0, (float(sold) / float(max_sold_in_batch)) * 100.0), 1)
+
+
+def calc_confidence_percent(sold, profit, margin, trend_change, trends_limited=False):
+    """
+    Confidence % (0-100) from sold strength, profit, margin, and trend.
+    This is a ranking score, not a guarantee of profit.
+    """
+    # Sold strength on a log scale (100 sold ~ low, 100k sold ~ 100)
+    sold_score = min(100.0, (math.log10(max(sold, 1)) / math.log10(MEGA_SOLD_THRESHOLD)) * 100.0)
+
+    # Profit: £5 ~ 33, £15+ ~ 100
+    profit_score = min(100.0, max(0.0, (profit / 15.0) * 100.0))
+
+    # Margin stored as fraction here
+    margin_pct = margin * 100.0 if margin <= 1.5 else float(margin)
+    margin_score = min(100.0, max(0.0, ((margin_pct - 30.0) / 30.0) * 100.0))
+
+    # Trend: if Trends was blocked, use a neutral mid score instead of punishing
+    if trends_limited and trend_change <= 0:
+        trend_score = 45.0
+    else:
+        trend_score = min(100.0, max(0.0, (float(trend_change) / 50.0) * 100.0))
+
+    confidence = (
+        0.30 * sold_score
+        + 0.25 * profit_score
+        + 0.20 * margin_score
+        + 0.25 * trend_score
+    )
+    return round(confidence, 1)
+
+
 # =============================================================================
 # Telegram helpers + commands
 # =============================================================================
@@ -480,9 +522,12 @@ def format_top_results_message(df_top):
     for i, row in enumerate(df_top.itertuples(index=False), start=1):
         mega = " | 100k+ sold" if getattr(row, "Mega_Seller", False) else ""
         title = str(row.Title)[:80]
+        sold_pct = getattr(row, "Sold_Percent", 0)
+        conf = getattr(row, "Confidence", 0)
         lines.append(
             f"{i}. {title}\n"
             f"   Profit: £{row.Profit:.2f} | Trend: {row.Trend_Change}%{mega}\n"
+            f"   Sold: {row.Sold} ({sold_pct}%) | Confidence: {conf}%\n"
             f"   {row.Link}\n"
         )
     return "\n".join(lines)
@@ -580,12 +625,14 @@ def find_winners():
         "Title",
         "Price",
         "Sold",
+        "Sold_Percent",
         "Link",
         "Mega_Seller",
         "Ali_Price",
         "Profit",
         "Margin",
         "Trend_Change",
+        "Confidence",
         "Trend_Keyword",
     ]
 
@@ -607,7 +654,16 @@ def find_winners():
     all_items = unique
 
     mega_count = sum(1 for i in all_items if i["Mega_Seller"])
-    print(f"\nUnique items with 100+ sold: {len(all_items)} (100k+ sold: {mega_count})")
+    max_sold = max((i["Sold"] for i in all_items), default=0)
+    print(
+        f"\nUnique items with 100+ sold: {len(all_items)} "
+        f"(100k+ sold: {mega_count}, max sold in batch: {max_sold})"
+    )
+
+    # Soften trend gate when Google Trends is blocked mid-run
+    required_trend = (
+        TREND_REQUIRED_WHEN_LIMITED if _TRENDS_RATE_LIMITED else MIN_TREND_CHANGE
+    )
 
     winners = []
     for item in all_items:
@@ -631,25 +687,43 @@ def find_winners():
             )
             trend_change = get_trend_change(keyword)
 
-            # Keep if: Sold >= 100 AND Profit >= 8 AND Margin >= 40% AND Trend >= 20%
-            # Mega sellers (100k+) use the same quality filters.
-            if trend_change >= MIN_TREND_CHANGE:
+            # Re-check required trend if rate-limit flipped during this loop
+            required_trend = (
+                TREND_REQUIRED_WHEN_LIMITED if _TRENDS_RATE_LIMITED else MIN_TREND_CHANGE
+            )
+
+            # Keep if: Sold/Profit/Margin pass AND Trend meets current threshold
+            if trend_change >= required_trend:
+                sold_pct = calc_sold_percent(item["Sold"], max_sold)
+                confidence = calc_confidence_percent(
+                    item["Sold"],
+                    profit,
+                    margin,
+                    trend_change,
+                    trends_limited=_TRENDS_RATE_LIMITED,
+                )
                 winners.append(
                     {
                         **item,
+                        "Sold_Percent": sold_pct,
                         "Ali_Price": ali_price,
                         "Profit": profit,
                         "Margin": round(margin * 100, 2),  # store as %
                         "Trend_Change": trend_change,
+                        "Confidence": confidence,
                         "Trend_Keyword": keyword,
                     }
                 )
                 print(
                     f"  WINNER: profit=£{profit} margin={margin * 100:.1f}% "
-                    f"trend={trend_change}% mega={item['Mega_Seller']}"
+                    f"trend={trend_change}% sold%={sold_pct} conf={confidence}% "
+                    f"mega={item['Mega_Seller']}"
                 )
             else:
-                print(f"  skip trend: {trend_change}% < {MIN_TREND_CHANGE}%")
+                print(
+                    f"  skip trend: {trend_change}% < {required_trend}% "
+                    f"(limited={_TRENDS_RATE_LIMITED})"
+                )
         except Exception as e:
             print(f"  Item error: {e}")
             continue
@@ -657,8 +731,8 @@ def find_winners():
     df = pd.DataFrame(winners)
     if not df.empty:
         df = df.sort_values(
-            by=["Mega_Seller", "Profit", "Trend_Change", "Sold"],
-            ascending=[False, False, False, False],
+            by=["Confidence", "Mega_Seller", "Profit", "Trend_Change", "Sold"],
+            ascending=[False, False, False, False, False],
         )
     else:
         df = pd.DataFrame(columns=empty_cols)
