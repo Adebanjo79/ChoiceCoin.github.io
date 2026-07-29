@@ -312,8 +312,12 @@ def calc_confidence_percent(
 
     # Amazon bestseller rank bonus (rank 1 = strong)
     amazon_score = 50.0
-    if amazon_rank:
-        amazon_score = max(20.0, 100.0 - (amazon_rank - 1) * 3.5)
+    if amazon_rank is not None and not (isinstance(amazon_rank, float) and math.isnan(amazon_rank)):
+        try:
+            rank_i = int(amazon_rank)
+            amazon_score = max(20.0, 100.0 - (rank_i - 1) * 3.5)
+        except (TypeError, ValueError):
+            amazon_score = 50.0
 
     if source == "amazon":
         confidence = (
@@ -635,20 +639,40 @@ def send_telegram_message(message):
         return False
 
 
+def _safe_float(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        number = float(value)
+        if math.isnan(number) or math.isinf(number):
+            return default
+        return number
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value, default=0):
+    return int(_safe_float(value, default))
+
+
 def format_top_results_message(df_top):
     lines = ["Dropship Sources (eBay + Amazon UK)\n"]
     for i, row in enumerate(df_top.itertuples(index=False), start=1):
         title = str(row.Title)[:80]
         source = getattr(row, "Source", "eBay UK")
-        sold_pct = getattr(row, "Sold_Percent", 0)
-        conf = getattr(row, "Confidence", 0)
+        sold_pct = _safe_float(getattr(row, "Sold_Percent", 0))
+        conf = _safe_float(getattr(row, "Confidence", 0))
         rank = getattr(row, "Amazon_Rank", None)
-        rank_bit = f" | AMZ#{int(rank)}" if rank else ""
-        sold_label = "Reviews~" if source.startswith("Amazon") else "Sold"
+        rank_val = _safe_float(rank, default=float("nan"))
+        rank_bit = "" if math.isnan(rank_val) or rank_val <= 0 else f" | AMZ#{int(rank_val)}"
+        sold_label = "Reviews~" if str(source).startswith("Amazon") else "Sold"
+        profit = _safe_float(getattr(row, "Profit", 0))
+        trend = _safe_float(getattr(row, "Trend_Change", 0))
+        sold = _safe_int(getattr(row, "Sold", 0))
         lines.append(
             f"{i}. [{source}] {title}\n"
-            f"   Profit: £{row.Profit:.2f} | Trend: {row.Trend_Change}%{rank_bit}\n"
-            f"   {sold_label}: {row.Sold} ({sold_pct}%) | Confidence: {conf}%\n"
+            f"   Profit: £{profit:.2f} | Trend: {trend}%{rank_bit}\n"
+            f"   {sold_label}: {sold} ({sold_pct}%) | Confidence: {conf}%\n"
             f"   {row.Link}\n"
         )
     return "\n".join(lines)
