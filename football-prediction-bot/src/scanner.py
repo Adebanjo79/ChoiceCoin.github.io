@@ -42,7 +42,9 @@ class PredictionScanner:
             codes = set(self.settings.leagues)
             return [f for f in fixtures if f.league_code in codes]
 
-        return self.fd.upcoming_fixtures(self.settings.leagues, days_ahead=7)
+        return self.fd.upcoming_fixtures(
+            self.settings.leagues, days_ahead=self.settings.days_ahead
+        )
 
     def load_forms(self, fixtures: list[Fixture]) -> tuple[dict[str, TeamForm], dict[str, TeamForm]]:
         by_id: dict[str, TeamForm] = {}

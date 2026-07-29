@@ -4,7 +4,9 @@ Daily multi-league football tips filtered for **≈3.0 odds** and **≥70% model
 
 Covers **Premier League, La Liga, Bundesliga, Ligue 1, Serie A, Eredivisie, Primeira Liga, Championship, Champions League**, and more.
 
-> Not betting advice. Model confidence is a conviction score from form + Poisson xG + value edge — **not a guaranteed 70% hit rate**. Odds near 3.0 imply ~33% bookmaker probability; treat bankroll carefully.
+**New to this / using a VPS?** Follow:
+- **[BEGINNER_SETUP.md](BEGINNER_SETUP.md)** — local install
+- **[VPS_PUTTY_SETUP.md](VPS_PUTTY_SETUP.md)** — PuTTY + Linux VPS 24/7
 
 ---
 

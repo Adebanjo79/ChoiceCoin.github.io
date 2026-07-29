@@ -44,10 +44,14 @@ You should see a “FOOTBALL DAILY TIPS” report with picks near **3.0 odds** a
 3. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env`
 4. Test: `python main.py --test-telegram`
 
-## 7. Daily schedule (VPS / always-on)
+## 7. Daily schedule (VPS / always-on with PuTTY)
+
+Full guide: **[VPS_PUTTY_SETUP.md](VPS_PUTTY_SETUP.md)**
+
+Short version:
 
 ```bash
 python main.py --daemon
 ```
 
-Runs once immediately, then every day at `RUN_HOUR_UTC` (default 08:00 UTC). Keep it alive with `tmux` or systemd.
+Runs once immediately, then every day at `RUN_HOUR_UTC` (default 08:00 UTC). Keep it alive with `tmux` so it survives closing PuTTY.

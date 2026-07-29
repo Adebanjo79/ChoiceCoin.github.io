@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -20,16 +21,32 @@ class FootballDataClient:
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
         self.session.headers.update({"X-Auth-Token": token})
+        # Free tier = 10 calls/min — pace requests
+        self._min_gap_seconds = 6.5
+        self._last_call = 0.0
+
+    def _throttle(self) -> None:
+        elapsed = time.monotonic() - self._last_call
+        if elapsed < self._min_gap_seconds:
+            time.sleep(self._min_gap_seconds - elapsed)
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
+        self._throttle()
         resp = self.session.get(url, params=params or {}, timeout=30)
+        self._last_call = time.monotonic()
         if resp.status_code == 429:
-            raise RuntimeError("football-data.org rate limit hit — wait and retry")
+            logger.warning("Rate limited — sleeping 60s then retrying once")
+            time.sleep(60)
+            self._throttle()
+            resp = self.session.get(url, params=params or {}, timeout=30)
+            self._last_call = time.monotonic()
+            if resp.status_code == 429:
+                raise RuntimeError("football-data.org rate limit hit — wait and retry")
         resp.raise_for_status()
         return resp.json()
 
-    def upcoming_fixtures(self, league_codes: list[str], days_ahead: int = 7) -> list[Fixture]:
+    def upcoming_fixtures(self, league_codes: list[str], days_ahead: int = 30) -> list[Fixture]:
         date_from = datetime.now(timezone.utc).date().isoformat()
         date_to = (datetime.now(timezone.utc) + timedelta(days=days_ahead)).date().isoformat()
         fixtures: list[Fixture] = []
@@ -44,6 +61,7 @@ class FootballDataClient:
                 continue
             for match in data.get("matches", []):
                 fixtures.append(self._parse_fixture(match, code))
+            logger.info("Loaded %s fixtures for %s", len(data.get("matches", [])), code)
         fixtures.sort(key=lambda f: f.kickoff)
         return fixtures
 

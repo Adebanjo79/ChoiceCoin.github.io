@@ -60,6 +60,8 @@ class Settings:
     )
     run_hour_utc: int = field(default_factory=lambda: _env_int("RUN_HOUR_UTC", 8))
     scan_interval_hours: int = field(default_factory=lambda: _env_int("SCAN_INTERVAL_HOURS", 24))
+    # Look ahead for fixtures (free-tier seasons often resume ~2–4 weeks out)
+    days_ahead: int = field(default_factory=lambda: _env_int("DAYS_AHEAD", 30))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     telegram_bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
