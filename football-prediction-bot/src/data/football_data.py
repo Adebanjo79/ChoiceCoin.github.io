@@ -1,0 +1,134 @@
+"""football-data.org API client (free token)."""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import requests
+
+from src.leagues import league_name
+from src.models import Fixture, TeamForm
+
+logger = logging.getLogger(__name__)
+
+
+class FootballDataClient:
+    def __init__(self, token: str, base_url: str = "https://api.football-data.org/v4") -> None:
+        self.token = token
+        self.base_url = base_url.rstrip("/")
+        self.session = requests.Session()
+        self.session.headers.update({"X-Auth-Token": token})
+
+    def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        url = f"{self.base_url}{path}"
+        resp = self.session.get(url, params=params or {}, timeout=30)
+        if resp.status_code == 429:
+            raise RuntimeError("football-data.org rate limit hit — wait and retry")
+        resp.raise_for_status()
+        return resp.json()
+
+    def upcoming_fixtures(self, league_codes: list[str], days_ahead: int = 7) -> list[Fixture]:
+        date_from = datetime.now(timezone.utc).date().isoformat()
+        date_to = (datetime.now(timezone.utc) + timedelta(days=days_ahead)).date().isoformat()
+        fixtures: list[Fixture] = []
+        for code in league_codes:
+            try:
+                data = self._get(
+                    f"/competitions/{code}/matches",
+                    {"status": "SCHEDULED", "dateFrom": date_from, "dateTo": date_to},
+                )
+            except Exception as exc:  # noqa: BLE001 — keep other leagues going
+                logger.warning("Failed fixtures for %s: %s", code, exc)
+                continue
+            for match in data.get("matches", []):
+                fixtures.append(self._parse_fixture(match, code))
+        fixtures.sort(key=lambda f: f.kickoff)
+        return fixtures
+
+    def team_form_from_matches(self, league_code: str, limit: int = 10) -> dict[str, TeamForm]:
+        """Build form tables from recently finished matches in a competition."""
+        try:
+            data = self._get(
+                f"/competitions/{league_code}/matches",
+                {"status": "FINISHED", "limit": 100},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed finished matches for %s: %s", league_code, exc)
+            return {}
+
+        forms: dict[str, TeamForm] = {}
+
+        def ensure(team: dict[str, Any]) -> TeamForm:
+            tid = team["id"]
+            key = str(tid)
+            if key not in forms:
+                forms[key] = TeamForm(team_id=tid, team_name=team["name"])
+            return forms[key]
+
+        matches = sorted(
+            data.get("matches", []),
+            key=lambda m: m.get("utcDate", ""),
+        )
+        for match in matches:
+            score = match.get("score", {}).get("fullTime") or {}
+            hg, ag = score.get("home"), score.get("away")
+            if hg is None or ag is None:
+                continue
+            home = ensure(match["homeTeam"])
+            away = ensure(match["awayTeam"])
+            self._apply_result(home, away, hg, ag)
+
+        # Trim recent_results to last `limit`
+        for form in forms.values():
+            form.recent_results = form.recent_results[-limit:]
+        return forms
+
+    @staticmethod
+    def _apply_result(home: TeamForm, away: TeamForm, hg: int, ag: int) -> None:
+        home.played += 1
+        away.played += 1
+        home.goals_for += hg
+        home.goals_against += ag
+        away.goals_for += ag
+        away.goals_against += hg
+        home.home_played += 1
+        home.home_gf += hg
+        home.home_ga += ag
+        away.away_played += 1
+        away.away_gf += ag
+        away.away_ga += hg
+
+        if hg > ag:
+            home.wins += 1
+            away.losses += 1
+            home.recent_results.append("W")
+            away.recent_results.append("L")
+        elif hg < ag:
+            away.wins += 1
+            home.losses += 1
+            home.recent_results.append("L")
+            away.recent_results.append("W")
+        else:
+            home.draws += 1
+            away.draws += 1
+            home.recent_results.append("D")
+            away.recent_results.append("D")
+
+    @staticmethod
+    def _parse_fixture(match: dict[str, Any], league_code: str) -> Fixture:
+        kickoff = datetime.fromisoformat(match["utcDate"].replace("Z", "+00:00"))
+        return Fixture(
+            id=str(match["id"]),
+            league_code=league_code,
+            league_name=league_name(league_code),
+            kickoff=kickoff,
+            home_team=match["homeTeam"]["name"],
+            away_team=match["awayTeam"]["name"],
+            home_team_id=match["homeTeam"]["id"],
+            away_team_id=match["awayTeam"]["id"],
+            status=match.get("status", "SCHEDULED"),
+            matchday=match.get("matchday"),
+            raw=match,
+        )
