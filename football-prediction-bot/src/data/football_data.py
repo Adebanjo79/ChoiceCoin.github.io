@@ -67,11 +67,23 @@ class FootballDataClient:
 
     def team_form_from_matches(self, league_code: str, limit: int = 10) -> dict[str, TeamForm]:
         """Build form tables from recently finished matches in a competition."""
+        matches: list[dict[str, Any]] = []
         try:
             data = self._get(
                 f"/competitions/{league_code}/matches",
                 {"status": "FINISHED", "limit": 100},
             )
+            matches = data.get("matches", [])
+            # Pre-season: current campaign may be empty — fall back to prior season
+            if not matches:
+                prior = datetime.now(timezone.utc).year - 1
+                data = self._get(
+                    f"/competitions/{league_code}/matches",
+                    {"status": "FINISHED", "season": prior, "limit": 100},
+                )
+                matches = data.get("matches", [])
+                if matches:
+                    logger.info("Using %s season form for %s", prior, league_code)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed finished matches for %s: %s", league_code, exc)
             return {}
@@ -85,11 +97,9 @@ class FootballDataClient:
                 forms[key] = TeamForm(team_id=tid, team_name=team["name"])
             return forms[key]
 
-        matches = sorted(
-            data.get("matches", []),
-            key=lambda m: m.get("utcDate", ""),
-        )
-        for match in matches:
+        matches = sorted(matches, key=lambda m: m.get("utcDate", ""))
+        # Prefer the most recent slice for form
+        for match in matches[-80:]:
             score = match.get("score", {}).get("fullTime") or {}
             hg, ag = score.get("home"), score.get("away")
             if hg is None or ag is None:
@@ -98,7 +108,6 @@ class FootballDataClient:
             away = ensure(match["awayTeam"])
             self._apply_result(home, away, hg, ag)
 
-        # Trim recent_results to last `limit`
         for form in forms.values():
             form.recent_results = form.recent_results[-limit:]
         return forms

@@ -4,9 +4,10 @@ Daily multi-league football tips filtered for **≈3.0 odds** and **≥70% model
 
 Covers **Premier League, La Liga, Bundesliga, Ligue 1, Serie A, Eredivisie, Primeira Liga, Championship, Champions League**, and more.
 
-**New to this / using a VPS?** Follow:
-- **[BEGINNER_SETUP.md](BEGINNER_SETUP.md)** — local install
-- **[VPS_PUTTY_SETUP.md](VPS_PUTTY_SETUP.md)** — PuTTY + Linux VPS 24/7
+**New to this / using a VPS?** Follow in order:
+1. **[START_HERE_PUTTY.md](START_HERE_PUTTY.md)** — Download → Extract → PuTTY → Run (absolute beginner)
+2. **[BEGINNER_SETUP.md](BEGINNER_SETUP.md)** — short local install notes
+3. **[VPS_PUTTY_SETUP.md](VPS_PUTTY_SETUP.md)** — compact VPS reference
 
 ---
 
