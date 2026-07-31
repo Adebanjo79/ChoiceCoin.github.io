@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entry point: multi-band football tips (≈3 / ≈5 / ≈50 odds) + Telegram."""
+"""Entry point: safest multi-game accus for ≈3 / ≈5 / ≈50 odds + Telegram."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from config import settings
+from src.accumulator import format_accumulator_report, format_band_accus
 from src.scanner import PredictionScanner
-from src.selector import format_multi_band_report, short_tips_summary
 
 
 def setup_logging(level: str) -> None:
@@ -44,20 +44,16 @@ def build_config(args: argparse.Namespace):
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Football Prediction Bot — best ≈3 / ≈5 / ≈50 odds tips + Telegram"
+        description="Football Acca Bot — safest 1–3 game ≈3.0, 4+ ≈5.0, 7+ ≈50"
     )
     parser.add_argument("--once", action="store_true", help="Run one tip cycle then exit (default)")
-    parser.add_argument(
-        "--daemon",
-        action="store_true",
-        help="Run forever: daily tips + Telegram commands + status heartbeats",
-    )
-    parser.add_argument("--json", action="store_true", help="Print multi-band tips as JSON")
-    parser.add_argument("--demo", action="store_true", help="Force demo fixtures (no API required)")
-    parser.add_argument("--test-telegram", action="store_true", help="Send a Telegram test message")
+    parser.add_argument("--daemon", action="store_true", help="Daily accus + Telegram commands")
+    parser.add_argument("--json", action="store_true", help="Print accumulators as JSON")
+    parser.add_argument("--demo", action="store_true", help="Force demo fixtures")
+    parser.add_argument("--test-telegram", action="store_true", help="Send Telegram test message")
     parser.add_argument("--status", action="store_true", help="Print / push bot status")
-    parser.add_argument("--min-confidence", type=float, default=None, help="Override MIN_CONFIDENCE")
-    parser.add_argument("--target-odds", type=float, default=None, help="Override TARGET_ODDS (3-band)")
+    parser.add_argument("--min-confidence", type=float, default=None)
+    parser.add_argument("--target-odds", type=float, default=None)
     args = parser.parse_args()
     setup_logging(settings.log_level)
     cfg = build_config(args)
@@ -66,9 +62,10 @@ def main() -> int:
 
     if args.test_telegram:
         ok = scanner.telegram.send(
-            "✅ Football Odds Bot Telegram OK\n"
-            f"Bands: ≈{cfg.target_odds:.0f} / ≈{cfg.target_odds_5:.0f} / ≈{cfg.target_odds_50:.0f}\n"
-            f"3-odd safety conf ≥ {cfg.safety_min_confidence:.0f}%\n"
+            "✅ Football Acca Bot Telegram OK\n"
+            "• Safest ≈3.0 — 1 / 2 / 3 games\n"
+            "• ≈5.0 — 4+ games\n"
+            "• ≈50 — 7+ games\n"
             "Commands: /tips /3odd /5odd /50odd /status /safety"
         )
         print("Telegram OK" if ok else "Telegram FAILED — set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID")
@@ -84,38 +81,29 @@ def main() -> int:
         return 0
 
     all_tips, fixture_count = scanner.analyze_all()
-    bands = scanner.select_all_bands(all_tips)
-    meta = scanner.band_defs()
+    accus = scanner.select_all_accus(all_tips)
+    specs = scanner.acca_specs()
 
     if args.json:
         print(json.dumps(scanner.export_json(), indent=2))
         return 0
 
-    report = format_multi_band_report(bands, meta)
-    scanner._cached_bands = bands
+    report = format_accumulator_report(accus, specs)
+    scanner._cached_accus = accus
     scanner._cached_report = report
-    scanner._cached_tips = bands.get("3odd", [])
     scanner._cached_band_reports = {
-        k: scanner.cached_band_report(k) for k in bands
+        key: format_band_accus(group, specs[key]) for key, group in accus.items()
     }
-    # rebuild proper per-band reports
-    from src.selector import format_daily_report
-
-    scanner._cached_band_reports = {
-        key: format_daily_report(
-            tips,
-            min_confidence=meta[key].min_confidence,
-            target_odds=meta[key].target_odds,
-            title=meta[key].title,
-        )
-        for key, tips in bands.items()
-    }
-    total = sum(len(v) for v in bands.values())
+    scanner._cached_tips = accus["3odd"][0].legs if accus.get("3odd") else []
+    total_legs = sum(a.leg_count for group in accus.values() for a in group)
     scanner.status.mark_scan(
         fixtures=fixture_count,
         predictions=len(all_tips),
-        tips=total,
-        summary=short_tips_summary(bands.get("3odd", [])),
+        tips=total_legs,
+        summary=(
+            f"accas 3:{len(accus['3odd'])} 5:{len(accus['5odd'])} "
+            f"50:{len(accus['50odd'])}"
+        ),
         ok=True,
     )
     print(report)

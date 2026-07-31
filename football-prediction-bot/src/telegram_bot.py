@@ -15,11 +15,11 @@ COMMANDS = [
     {"command": "start", "description": "Welcome + how to use"},
     {"command": "help", "description": "List commands"},
     {"command": "status", "description": "Bot health / last scan"},
-    {"command": "tips", "description": "Full board: 3 / 5 / 50 odds"},
-    {"command": "3odd", "description": "Best ≈3.0 odds tips"},
-    {"command": "5odd", "description": "Best ≈5.0 odds tips"},
-    {"command": "50odd", "description": "Best ≈50 odds longshots"},
-    {"command": "safety", "description": "Refresh all bands now"},
+    {"command": "tips", "description": "Full acca board: 3 / 5 / 50"},
+    {"command": "3odd", "description": "Safest ≈3.0 — 1 to 3 games"},
+    {"command": "5odd", "description": "≈5.0 accumulator — 4+ games"},
+    {"command": "50odd", "description": "≈50 accumulator — 7+ games"},
+    {"command": "safety", "description": "Refresh all accumulators now"},
     {"command": "ping", "description": "Quick alive check"},
 ]
 
@@ -83,17 +83,16 @@ class TelegramCommandBot:
     def _dispatch(self, cmd: str) -> str:
         if cmd in {"/start", "/help"}:
             return (
-                "⚽ Football Odds Bot\n"
-                "Best sourced tips for ≈3 / ≈5 / ≈50 odds with confidence.\n\n"
-                "Commands:\n"
-                "/tips — full daily board\n"
-                "/3odd — best ≈3.0 safety tips\n"
-                "/5odd — best ≈5.0 value tips\n"
-                "/50odd — best ≈50 longshots (correct scores)\n"
-                "/safety — refresh scan now\n"
-                "/status — bot health\n"
-                "/ping — alive check\n\n"
-                "Not betting advice."
+                "⚽ Football Acca Bot\n"
+                "Safest multi-game tickets with confidence.\n\n"
+                "• /3odd — safest ≈3.0 (1, 2 or 3 games)\n"
+                "• /5odd — ≈5.0 accumulator (4+ games)\n"
+                "• /50odd — ≈50 accumulator (7+ games)\n"
+                "• /tips — full daily board\n"
+                "• /safety — refresh now\n"
+                "• /status — bot health\n"
+                "• /ping — alive check\n\n"
+                "Not betting advice. One losing leg kills an accumulator."
             )
         if cmd == "/ping":
             return f"pong ✅ | uptime {self.status.uptime()} | mode {self.status.mode}"

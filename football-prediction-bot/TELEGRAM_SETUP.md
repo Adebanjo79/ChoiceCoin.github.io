@@ -61,13 +61,13 @@ Detach: `Ctrl+B` then `D`
 | When | What |
 |------|------|
 | Bot starts | Online notice |
-| Every day at `RUN_HOUR_UTC` | Full board: best ≈3 / ≈5 / ≈50 odds |
+| Every day at `RUN_HOUR_UTC` | Acca board: ≈3 / ≈5 / ≈50 |
 | Every `STATUS_INTERVAL_HOURS` | 📡 Status heartbeat |
-| `/tips` | Full multi-band board |
-| `/3odd` | Best ≈3.0 safety tips |
-| `/5odd` | Best ≈5.0 value tips |
-| `/50odd` | Best ≈50 longshots (correct scores) |
-| `/safety` | Fresh scan of all bands |
+| `/tips` | Full accumulator board |
+| `/3odd` | Safest ≈3.0 — **1, 2 or 3 games** |
+| `/5odd` | ≈5.0 — **4+ games** |
+| `/50odd` | ≈50 — **7+ games** |
+| `/safety` | Fresh scan of all accumulators |
 | `/status` | Live health / last scan |
 | `/ping` | Quick alive check |
 

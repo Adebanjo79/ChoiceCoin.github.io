@@ -17,7 +17,9 @@ Covers **Premier League, La Liga, Bundesliga, Ligue 1, Serie A, Eredivisie, Prim
 python main.py --daemon
 ```
 
-- Daily board with **best ≈3 / ≈5 / ≈50 odds** tips + confidence
+- **Safest ≈3.0** accumulators using **1, 2 or 3 games**
+- **≈5.0** accumulators using **4+ games**
+- **≈50** accumulators using **7+ games**
 - Heartbeat `/status` every `STATUS_INTERVAL_HOURS` (default 6h)
 - Commands: `/tips` `/3odd` `/5odd` `/50odd` `/safety` `/status` `/ping`
 

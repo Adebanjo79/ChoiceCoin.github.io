@@ -38,13 +38,16 @@ def _env_list(name: str, default: list[str] | None = None) -> list[str]:
 
 DEFAULT_LEAGUES = ["PL", "PD", "BL1", "FL1", "SA", "DED", "PPL", "ELC", "CL"]
 DEFAULT_MARKETS = [
+    "home_win",
     "draw",
     "away_win",
     "over_25",
+    "under_25",
     "btts_yes",
+    "btts_no",
     "away_or_draw",
-    "over_35",
     "home_or_draw",
+    "over_35",
     "over_45",
     "home_win_nil",
     "away_win_nil",
@@ -83,6 +86,19 @@ class Settings:
     include_correct_scores: bool = field(
         default_factory=lambda: _env_bool("INCLUDE_CORRECT_SCORES", True)
     )
+    # Accumulator leg counts
+    # 3-odd safest: 1, 2 or 3 games combining to ~3.0
+    acca3_min_legs: int = field(default_factory=lambda: _env_int("ACCA3_MIN_LEGS", 1))
+    acca3_max_legs: int = field(default_factory=lambda: _env_int("ACCA3_MAX_LEGS", 3))
+    # 5-odd: more than 3 games
+    acca5_min_legs: int = field(default_factory=lambda: _env_int("ACCA5_MIN_LEGS", 4))
+    acca5_max_legs: int = field(default_factory=lambda: _env_int("ACCA5_MAX_LEGS", 6))
+    # 50-odd: even more games
+    acca50_min_legs: int = field(default_factory=lambda: _env_int("ACCA50_MIN_LEGS", 7))
+    acca50_max_legs: int = field(default_factory=lambda: _env_int("ACCA50_MAX_LEGS", 12))
+    # Per-leg odds window for safer multi building
+    acca_leg_odds_min: float = field(default_factory=lambda: _env_float("ACCA_LEG_ODDS_MIN", 1.20))
+    acca_leg_odds_max: float = field(default_factory=lambda: _env_float("ACCA_LEG_ODDS_MAX", 2.35))
     leagues: list[str] = field(
         default_factory=lambda: [c.upper() for c in _env_list("LEAGUES", DEFAULT_LEAGUES)]
     )

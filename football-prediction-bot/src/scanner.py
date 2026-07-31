@@ -1,4 +1,4 @@
-"""Daily scan orchestrator across leagues + Telegram delivery."""
+"""Daily scan orchestrator — multi-game accumulators for ≈3 / ≈5 / ≈50 odds."""
 
 from __future__ import annotations
 
@@ -11,20 +11,19 @@ from typing import Any
 import schedule
 
 from config import Settings
+from src.accumulator import (
+    AccaSpec,
+    Accumulator,
+    build_accumulators,
+    format_accumulator_report,
+    format_band_accus,
+)
 from src.analysis.engine import analyze_fixture, resolve_form, tips_from_predictions
 from src.data.demo_fixtures import demo_fixtures, demo_team_forms
 from src.data.football_data import FootballDataClient
 from src.data.odds_api import OddsApiClient
 from src.models import Fixture, TeamForm, Tip
 from src.runtime_status import RuntimeStatus
-from src.selector import (
-    OddsBand,
-    format_daily_report,
-    format_multi_band_report,
-    select_best_for_band,
-    select_safety_tips,
-    short_tips_summary,
-)
 from src.telegram_alerter import TelegramAlerter
 from src.telegram_bot import TelegramCommandBot
 
@@ -44,7 +43,11 @@ class PredictionScanner:
             leagues=list(settings.leagues),
         )
         self._cached_tips: list[Tip] = []
-        self._cached_bands: dict[str, list[Tip]] = {"3odd": [], "5odd": [], "50odd": []}
+        self._cached_accus: dict[str, list[Accumulator]] = {
+            "3odd": [],
+            "5odd": [],
+            "50odd": [],
+        }
         self._cached_band_reports: dict[str, str] = {}
         self._cached_report = "No tips yet. Use /safety to scan."
         self.fd: FootballDataClient | None = None
@@ -66,33 +69,48 @@ class PredictionScanner:
             on_band=self.cached_band_report,
         )
 
-    def band_defs(self) -> dict[str, OddsBand]:
+    def acca_specs(self) -> dict[str, AccaSpec]:
         s = self.settings
         return {
-            "3odd": OddsBand(
-                key="3odd",
-                title="🛡️ BEST 3-ODD",
+            "3odd": AccaSpec(
+                band_key="3odd",
+                title="🛡️ SAFEST 3-ODD ACCA (1–3 games)",
                 target_odds=s.target_odds,
                 tolerance=s.odds_tolerance,
                 min_confidence=s.safety_min_confidence,
-                max_tips=s.max_daily_tips,
-                prefer_safety_markets=True,
+                min_legs=s.acca3_min_legs,
+                max_legs=s.acca3_max_legs,
+                leg_odds_min=s.acca_leg_odds_min,
+                leg_odds_max=min(s.acca_leg_odds_max, 2.50),
+                prefer_safe_markets=True,
+                max_accus=3,  # offer 1-game, 2-game, 3-game options
             ),
-            "5odd": OddsBand(
-                key="5odd",
-                title="🎯 VALUE 5-ODD",
+            "5odd": AccaSpec(
+                band_key="5odd",
+                title="🎯 5-ODD ACCA (4+ games)",
                 target_odds=s.target_odds_5,
                 tolerance=s.odds_tolerance_5,
                 min_confidence=s.odd5_min_confidence,
-                max_tips=s.max_tips_5,
+                min_legs=s.acca5_min_legs,
+                max_legs=s.acca5_max_legs,
+                leg_odds_min=s.acca_leg_odds_min,
+                leg_odds_max=s.acca_leg_odds_max,
+                prefer_safe_markets=True,
+                max_accus=2,
             ),
-            "50odd": OddsBand(
-                key="50odd",
-                title="🚀 LONGSHOT 50-ODD",
+            "50odd": AccaSpec(
+                band_key="50odd",
+                title="🚀 50-ODD ACCA (7+ games)",
                 target_odds=s.target_odds_50,
                 tolerance=s.odds_tolerance_50,
-                min_confidence=s.odd50_min_confidence,
-                max_tips=s.max_tips_50,
+                min_confidence=max(55.0, s.odd50_min_confidence - 5),
+                min_legs=s.acca50_min_legs,
+                max_legs=s.acca50_max_legs,
+                # Longer per-leg prices so 7–12 folds can reach ≈50 combined
+                leg_odds_min=max(1.35, s.acca_leg_odds_min),
+                leg_odds_max=max(s.acca_leg_odds_max, 3.20),
+                prefer_safe_markets=True,
+                max_accus=2,
             ),
         }
 
@@ -167,18 +185,15 @@ class PredictionScanner:
         )
         return all_tips, len(fixtures)
 
-    def select_safety(self, tips: list[Tip]) -> list[Tip]:
-        return select_safety_tips(
-            tips,
-            min_confidence=self.settings.safety_min_confidence,
-            target_odds=self.settings.target_odds,
-            odds_tolerance=self.settings.odds_tolerance,
-            max_tips=self.settings.max_daily_tips,
-        )
+    def select_all_accus(self, tips: list[Tip]) -> dict[str, list[Accumulator]]:
+        specs = self.acca_specs()
+        return {key: build_accumulators(tips, spec) for key, spec in specs.items()}
 
+    # Back-compat alias used by older main paths
     def select_all_bands(self, tips: list[Tip]) -> dict[str, list[Tip]]:
-        bands = self.band_defs()
-        return {key: select_best_for_band(tips, band) for key, band in bands.items()}
+        accus = self.select_all_accus(tips)
+        # flatten first acca legs per band for any legacy caller
+        return {k: (v[0].legs if v else []) for k, v in accus.items()}
 
     def cached_tips_report(self) -> str:
         return self._cached_report
@@ -186,7 +201,7 @@ class PredictionScanner:
     def cached_band_report(self, band_key: str) -> str:
         if band_key in self._cached_band_reports:
             return self._cached_band_reports[band_key]
-        return f"No {band_key} tips cached yet. Use /safety to refresh."
+        return f"No {band_key} accumulator cached yet. Use /safety to refresh."
 
     def refresh_safety_report(self) -> str:
         self.run_daily(push_telegram=True)
@@ -196,34 +211,26 @@ class PredictionScanner:
         self.status.mark_scan_start()
         try:
             all_tips, fixture_count = self.analyze_all()
-            bands = self.select_all_bands(all_tips)
-            meta = self.band_defs()
-            report = format_multi_band_report(bands, meta)
+            accus = self.select_all_accus(all_tips)
+            specs = self.acca_specs()
+            report = format_accumulator_report(accus, specs)
 
-            # Per-band cached reports for Telegram commands
-            self._cached_bands = bands
+            self._cached_accus = accus
             self._cached_band_reports = {
-                key: format_daily_report(
-                    tips,
-                    min_confidence=meta[key].min_confidence,
-                    target_odds=meta[key].target_odds,
-                    title=meta[key].title,
-                )
-                for key, tips in bands.items()
+                key: format_band_accus(group, specs[key]) for key, group in accus.items()
             }
-            self._cached_tips = bands.get("3odd", [])
+            self._cached_tips = accus["3odd"][0].legs if accus.get("3odd") else []
             self._cached_report = report
 
-            total_tips = sum(len(v) for v in bands.values())
+            total_legs = sum(a.leg_count for group in accus.values() for a in group)
             summary = (
-                f"3odd:{len(bands['3odd'])} | 5odd:{len(bands['5odd'])} | "
-                f"50odd:{len(bands['50odd'])} || "
-                + short_tips_summary(bands["3odd"])
+                f"accas 3:{len(accus['3odd'])} 5:{len(accus['5odd'])} "
+                f"50:{len(accus['50odd'])} | legs:{total_legs}"
             )
             self.status.mark_scan(
                 fixtures=fixture_count,
                 predictions=len(all_tips),
-                tips=total_tips,
+                tips=total_legs,
                 summary=summary,
                 ok=True,
             )
@@ -231,9 +238,9 @@ class PredictionScanner:
             if push_telegram and self.telegram.enabled:
                 if self.telegram.send(report):
                     self.status.mark_telegram_push()
-            elif total_tips == 0:
-                logger.info("No tips met filters today across bands")
-            return bands.get("3odd", [])
+            elif total_legs == 0:
+                logger.info("No accumulators met filters today")
+            return self._cached_tips
         except Exception as exc:  # noqa: BLE001
             logger.exception("Daily scan failed: %s", exc)
             self.status.mark_scan(
@@ -265,12 +272,15 @@ class PredictionScanner:
             schedule.every(status_hours).hours.do(self.push_status)
             logger.info("Telegram status heartbeat every %sh", status_hours)
 
-        logger.info("Scheduled daily multi-band tips at %02d:00 UTC", hour)
+        logger.info("Scheduled daily ACCA board at %02d:00 UTC", hour)
         if self.telegram.enabled:
             self.telegram.send(
-                "🟢 Football Odds Bot online\n"
-                f"Daily board: ≈3 / ≈5 / ≈50 odds @ {hour:02d}:00 UTC\n"
-                f"3-odd safety conf ≥ {self.settings.safety_min_confidence:.0f}%\n"
+                "🟢 Football Acca Bot online\n"
+                "Daily tickets:\n"
+                "• Safest ≈3.0 — 1 to 3 games\n"
+                "• ≈5.0 — 4+ games\n"
+                "• ≈50 — 7+ games\n"
+                f"Push time: {hour:02d}:00 UTC\n"
                 "Commands: /tips /3odd /5odd /50odd /status /safety"
             )
             self.status.mark_status_push()
@@ -287,9 +297,9 @@ class PredictionScanner:
 
     def export_json(self) -> dict[str, list[dict[str, Any]]]:
         all_tips, _ = self.analyze_all()
-        bands = self.select_all_bands(all_tips)
+        accus = self.select_all_accus(all_tips)
         now = datetime.now(timezone.utc).isoformat()
         return {
-            key: [{**t.to_dict(), "generated_at": now, "band": key} for t in tips]
-            for key, tips in bands.items()
+            key: [{**a.to_dict(), "generated_at": now} for a in group]
+            for key, group in accus.items()
         }
