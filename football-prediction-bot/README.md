@@ -6,9 +6,20 @@ Covers **Premier League, La Liga, Bundesliga, Ligue 1, Serie A, Eredivisie, Prim
 
 **New to this / using a VPS?** Follow in order:
 1. **[PUTTY_ONLY_SETUP.md](PUTTY_ONLY_SETUP.md)** — **PuTTY only** (no WinSCP) ← start here
-2. **[START_HERE_PUTTY.md](START_HERE_PUTTY.md)** — Download ZIP + WinSCP upload path
-3. **[BEGINNER_SETUP.md](BEGINNER_SETUP.md)** — short local install notes
-4. **[VPS_PUTTY_SETUP.md](VPS_PUTTY_SETUP.md)** — compact VPS reference
+2. **[TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)** — daily safety 3-odd tips + `/status` commands
+3. **[START_HERE_PUTTY.md](START_HERE_PUTTY.md)** — Download ZIP + WinSCP upload path
+4. **[BEGINNER_SETUP.md](BEGINNER_SETUP.md)** — short local install notes
+5. **[VPS_PUTTY_SETUP.md](VPS_PUTTY_SETUP.md)** — compact VPS reference
+
+### Telegram (daemon mode)
+
+```bash
+python main.py --daemon
+```
+
+- Pushes **🛡️ SAFETY 3-ODD DAILY TIPS** every day (`RUN_HOUR_UTC`)
+- Heartbeat `/status` every `STATUS_INTERVAL_HOURS` (default 6h)
+- Commands: `/status` `/tips` `/safety` `/ping` `/help`
 
 ---
 

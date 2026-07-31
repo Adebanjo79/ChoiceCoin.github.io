@@ -128,7 +128,41 @@ python main.py --demo --once
 
 ---
 
-## Step 8 — Run 24/7 (survive closing PuTTY)
+## Step 8 — Add Telegram (daily tips + status checks)
+
+Full guide: **[TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)**
+
+1. Telegram → `@BotFather` → `/newbot` → copy token  
+2. Start your bot, get chat id from `@userinfobot`  
+3. Edit `.env`:
+
+```bash
+nano .env
+```
+
+```env
+TELEGRAM_BOT_TOKEN=paste_bot_token
+TELEGRAM_CHAT_ID=paste_chat_id
+SAFETY_MIN_CONFIDENCE=75
+TARGET_ODDS=3.0
+MAX_DAILY_TIPS=3
+STATUS_INTERVAL_HOURS=6
+```
+
+4. Test:
+
+```bash
+source .venv/bin/activate
+python main.py --test-telegram
+```
+
+On Telegram you can always send:
+- `/status` — bot health
+- `/tips` — latest safety 3-odd tips
+- `/safety` — refresh tips now
+- `/ping` — alive check
+
+## Step 9 — Run 24/7 (survive closing PuTTY)
 
 ```bash
 tmux new -s football

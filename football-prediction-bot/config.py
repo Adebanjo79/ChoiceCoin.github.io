@@ -37,7 +37,15 @@ def _env_list(name: str, default: list[str] | None = None) -> list[str]:
 
 
 DEFAULT_LEAGUES = ["PL", "PD", "BL1", "FL1", "SA", "DED", "PPL", "ELC", "CL"]
-DEFAULT_MARKETS = ["draw", "away_win", "over_25", "btts_yes", "away_or_draw", "over_35"]
+DEFAULT_MARKETS = [
+    "draw",
+    "away_win",
+    "over_25",
+    "btts_yes",
+    "away_or_draw",
+    "over_35",
+    "home_or_draw",
+]
 
 
 @dataclass(frozen=True)
@@ -48,9 +56,13 @@ class Settings:
     odds_api_key: str = field(default_factory=lambda: os.getenv("ODDS_API_KEY", "").strip())
     demo_mode: bool = field(default_factory=lambda: _env_bool("DEMO_MODE", False))
     min_confidence: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE", 70.0))
+    # Stricter gate for Telegram "safety" daily tips
+    safety_min_confidence: float = field(
+        default_factory=lambda: _env_float("SAFETY_MIN_CONFIDENCE", 75.0)
+    )
     target_odds: float = field(default_factory=lambda: _env_float("TARGET_ODDS", 3.0))
     odds_tolerance: float = field(default_factory=lambda: _env_float("ODDS_TOLERANCE", 0.75))
-    max_daily_tips: int = field(default_factory=lambda: _env_int("MAX_DAILY_TIPS", 5))
+    max_daily_tips: int = field(default_factory=lambda: _env_int("MAX_DAILY_TIPS", 3))
     min_daily_tips: int = field(default_factory=lambda: _env_int("MIN_DAILY_TIPS", 1))
     leagues: list[str] = field(
         default_factory=lambda: [c.upper() for c in _env_list("LEAGUES", DEFAULT_LEAGUES)]
@@ -60,8 +72,10 @@ class Settings:
     )
     run_hour_utc: int = field(default_factory=lambda: _env_int("RUN_HOUR_UTC", 8))
     scan_interval_hours: int = field(default_factory=lambda: _env_int("SCAN_INTERVAL_HOURS", 24))
-    # Look ahead for fixtures (free-tier seasons often resume ~2–4 weeks out)
     days_ahead: int = field(default_factory=lambda: _env_int("DAYS_AHEAD", 30))
+    # Push a status heartbeat to Telegram every N hours (0 = disabled)
+    status_interval_hours: int = field(default_factory=lambda: _env_int("STATUS_INTERVAL_HOURS", 6))
+    telegram_poll_seconds: int = field(default_factory=lambda: _env_int("TELEGRAM_POLL_SECONDS", 5))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     telegram_bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
