@@ -42,7 +42,20 @@ MARKET_LABELS: dict[str, str] = {
     "under_25": "Under 2.5 Goals",
     "over_35": "Over 3.5 Goals",
     "under_35": "Under 3.5 Goals",
+    "over_45": "Over 4.5 Goals",
+    "home_win_nil": "Home Win to Nil",
+    "away_win_nil": "Away Win to Nil",
 }
+
+
+def market_label(market: str) -> str:
+    if market in MARKET_LABELS:
+        return MARKET_LABELS[market]
+    if market.startswith("cs_"):
+        parts = market.split("_")
+        if len(parts) == 3:
+            return f"Correct Score {parts[1]}-{parts[2]}"
+    return market
 
 
 def league_name(code: str) -> str:

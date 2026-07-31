@@ -61,7 +61,8 @@ def expected_goals(home: TeamForm, away: TeamForm, league_avg_gf: float = 1.35) 
 def market_probabilities(home_xg: float, away_xg: float) -> dict[str, float]:
     matrix = score_matrix(round(home_xg, 3), round(away_xg, 3))
     n = len(matrix)
-    home_win = draw = away_win = btts_yes = over_25 = over_35 = 0.0
+    home_win = draw = away_win = btts_yes = over_25 = over_35 = over_45 = 0.0
+    home_nil = away_nil = 0.0
     for i in range(n):
         for j in range(n):
             p = matrix[i][j]
@@ -78,6 +79,12 @@ def market_probabilities(home_xg: float, away_xg: float) -> dict[str, float]:
                 over_25 += p
             if total > 3.5:
                 over_35 += p
+            if total > 4.5:
+                over_45 += p
+            if i > j and j == 0:
+                home_nil += p
+            if j > i and i == 0:
+                away_nil += p
 
     return {
         "home_win": home_win,
@@ -91,7 +98,22 @@ def market_probabilities(home_xg: float, away_xg: float) -> dict[str, float]:
         "under_25": 1.0 - over_25,
         "over_35": over_35,
         "under_35": 1.0 - over_35,
+        "over_45": over_45,
+        "home_win_nil": home_nil,
+        "away_win_nil": away_nil,
     }
+
+
+def correct_score_probabilities(
+    home_xg: float, away_xg: float, max_goals: int = 5
+) -> dict[str, float]:
+    """Exact-score probs keyed like cs_2_1 (home 2–1 away)."""
+    matrix = score_matrix(round(home_xg, 3), round(away_xg, 3), max_goals=max(max_goals, 8))
+    out: dict[str, float] = {}
+    for i in range(max_goals + 1):
+        for j in range(max_goals + 1):
+            out[f"cs_{i}_{j}"] = matrix[i][j]
+    return out
 
 
 def fair_odds(probability: float) -> float:

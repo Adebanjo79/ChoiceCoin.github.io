@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entry point: multi-league football prediction bot (≈3.0 odds, safety tips + Telegram)."""
+"""Entry point: multi-band football tips (≈3 / ≈5 / ≈50 odds) + Telegram."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 
 from config import settings
 from src.scanner import PredictionScanner
-from src.selector import format_daily_report, select_daily_tips
+from src.selector import format_multi_band_report, short_tips_summary
 
 
 def setup_logging(level: str) -> None:
@@ -44,7 +44,7 @@ def build_config(args: argparse.Namespace):
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Football Prediction Bot — safety ≈3.0 odds tips + Telegram status"
+        description="Football Prediction Bot — best ≈3 / ≈5 / ≈50 odds tips + Telegram"
     )
     parser.add_argument("--once", action="store_true", help="Run one tip cycle then exit (default)")
     parser.add_argument(
@@ -52,17 +52,12 @@ def main() -> int:
         action="store_true",
         help="Run forever: daily tips + Telegram commands + status heartbeats",
     )
-    parser.add_argument("--json", action="store_true", help="Print selected tips as JSON")
-    parser.add_argument(
-        "--all-markets",
-        action="store_true",
-        help="Also print top analyzed markets before the filtered daily tips",
-    )
+    parser.add_argument("--json", action="store_true", help="Print multi-band tips as JSON")
     parser.add_argument("--demo", action="store_true", help="Force demo fixtures (no API required)")
     parser.add_argument("--test-telegram", action="store_true", help="Send a Telegram test message")
     parser.add_argument("--status", action="store_true", help="Print / push bot status")
     parser.add_argument("--min-confidence", type=float, default=None, help="Override MIN_CONFIDENCE")
-    parser.add_argument("--target-odds", type=float, default=None, help="Override TARGET_ODDS")
+    parser.add_argument("--target-odds", type=float, default=None, help="Override TARGET_ODDS (3-band)")
     args = parser.parse_args()
     setup_logging(settings.log_level)
     cfg = build_config(args)
@@ -71,11 +66,10 @@ def main() -> int:
 
     if args.test_telegram:
         ok = scanner.telegram.send(
-            "✅ Football Safety Bot Telegram OK\n"
-            f"Safety: conf ≥ {cfg.safety_min_confidence:.0f}% | odds ≈ {cfg.target_odds:.2f}\n"
-            f"Max daily tips: {cfg.max_daily_tips}\n"
-            f"Leagues: {', '.join(cfg.leagues)}\n"
-            "Commands: /status /tips /safety /help"
+            "✅ Football Odds Bot Telegram OK\n"
+            f"Bands: ≈{cfg.target_odds:.0f} / ≈{cfg.target_odds_5:.0f} / ≈{cfg.target_odds_50:.0f}\n"
+            f"3-odd safety conf ≥ {cfg.safety_min_confidence:.0f}%\n"
+            "Commands: /tips /3odd /5odd /50odd /status /safety"
         )
         print("Telegram OK" if ok else "Telegram FAILED — set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID")
         return 0 if ok else 1
@@ -89,44 +83,39 @@ def main() -> int:
         scanner.run_forever()
         return 0
 
-    all_tips, _fixture_count = scanner.analyze_all()
-    selected = scanner.select_safety(all_tips)
+    all_tips, fixture_count = scanner.analyze_all()
+    bands = scanner.select_all_bands(all_tips)
+    meta = scanner.band_defs()
 
     if args.json:
-        print(json.dumps([t.to_dict() for t in selected], indent=2))
+        print(json.dumps(scanner.export_json(), indent=2))
         return 0
 
-    if args.all_markets:
-        # show broader filter too
-        broad = select_daily_tips(
-            all_tips,
-            min_confidence=cfg.min_confidence,
-            target_odds=cfg.target_odds,
-            odds_tolerance=cfg.odds_tolerance,
-            max_tips=20,
-        )
-        for tip in broad[:40]:
-            p = tip.prediction
-            print(
-                f"{tip.fixture.league_code} | {tip.fixture.label} | {p.market_label} | "
-                f"odds={p.display_odds:.2f} conf={p.confidence:.0f}% "
-                f"p={p.probability * 100:.1f}%"
-            )
-        print("─" * 36)
-
-    report = format_daily_report(
-        selected,
-        min_confidence=cfg.safety_min_confidence,
-        target_odds=cfg.target_odds,
-        title="🛡️ SAFETY 3-ODD DAILY TIPS",
-    )
+    report = format_multi_band_report(bands, meta)
+    scanner._cached_bands = bands
     scanner._cached_report = report
-    scanner._cached_tips = selected
+    scanner._cached_tips = bands.get("3odd", [])
+    scanner._cached_band_reports = {
+        k: scanner.cached_band_report(k) for k in bands
+    }
+    # rebuild proper per-band reports
+    from src.selector import format_daily_report
+
+    scanner._cached_band_reports = {
+        key: format_daily_report(
+            tips,
+            min_confidence=meta[key].min_confidence,
+            target_odds=meta[key].target_odds,
+            title=meta[key].title,
+        )
+        for key, tips in bands.items()
+    }
+    total = sum(len(v) for v in bands.values())
     scanner.status.mark_scan(
-        fixtures=_fixture_count,
+        fixtures=fixture_count,
         predictions=len(all_tips),
-        tips=len(selected),
-        summary=report.split("─")[0][:120],
+        tips=total,
+        summary=short_tips_summary(bands.get("3odd", [])),
         ok=True,
     )
     print(report)

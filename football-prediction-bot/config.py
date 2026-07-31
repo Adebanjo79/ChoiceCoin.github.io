@@ -45,6 +45,9 @@ DEFAULT_MARKETS = [
     "away_or_draw",
     "over_35",
     "home_or_draw",
+    "over_45",
+    "home_win_nil",
+    "away_win_nil",
 ]
 
 
@@ -56,14 +59,30 @@ class Settings:
     odds_api_key: str = field(default_factory=lambda: os.getenv("ODDS_API_KEY", "").strip())
     demo_mode: bool = field(default_factory=lambda: _env_bool("DEMO_MODE", False))
     min_confidence: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE", 70.0))
-    # Stricter gate for Telegram "safety" daily tips
     safety_min_confidence: float = field(
         default_factory=lambda: _env_float("SAFETY_MIN_CONFIDENCE", 75.0)
     )
+    # ~5.0 odds band
+    odd5_min_confidence: float = field(
+        default_factory=lambda: _env_float("ODD5_MIN_CONFIDENCE", 70.0)
+    )
+    # ~50.0 longshot band (correct scores) — lower absolute conf floor
+    odd50_min_confidence: float = field(
+        default_factory=lambda: _env_float("ODD50_MIN_CONFIDENCE", 60.0)
+    )
     target_odds: float = field(default_factory=lambda: _env_float("TARGET_ODDS", 3.0))
+    target_odds_5: float = field(default_factory=lambda: _env_float("TARGET_ODDS_5", 5.0))
+    target_odds_50: float = field(default_factory=lambda: _env_float("TARGET_ODDS_50", 50.0))
     odds_tolerance: float = field(default_factory=lambda: _env_float("ODDS_TOLERANCE", 0.75))
+    odds_tolerance_5: float = field(default_factory=lambda: _env_float("ODDS_TOLERANCE_5", 1.25))
+    odds_tolerance_50: float = field(default_factory=lambda: _env_float("ODDS_TOLERANCE_50", 20.0))
     max_daily_tips: int = field(default_factory=lambda: _env_int("MAX_DAILY_TIPS", 3))
+    max_tips_5: int = field(default_factory=lambda: _env_int("MAX_TIPS_5", 3))
+    max_tips_50: int = field(default_factory=lambda: _env_int("MAX_TIPS_50", 3))
     min_daily_tips: int = field(default_factory=lambda: _env_int("MIN_DAILY_TIPS", 1))
+    include_correct_scores: bool = field(
+        default_factory=lambda: _env_bool("INCLUDE_CORRECT_SCORES", True)
+    )
     leagues: list[str] = field(
         default_factory=lambda: [c.upper() for c in _env_list("LEAGUES", DEFAULT_LEAGUES)]
     )
@@ -73,7 +92,6 @@ class Settings:
     run_hour_utc: int = field(default_factory=lambda: _env_int("RUN_HOUR_UTC", 8))
     scan_interval_hours: int = field(default_factory=lambda: _env_int("SCAN_INTERVAL_HOURS", 24))
     days_ahead: int = field(default_factory=lambda: _env_int("DAYS_AHEAD", 30))
-    # Push a status heartbeat to Telegram every N hours (0 = disabled)
     status_interval_hours: int = field(default_factory=lambda: _env_int("STATUS_INTERVAL_HOURS", 6))
     telegram_poll_seconds: int = field(default_factory=lambda: _env_int("TELEGRAM_POLL_SECONDS", 5))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
@@ -83,7 +101,6 @@ class Settings:
     odds_api_base_url: str = "https://api.the-odds-api.com/v4"
 
     def use_demo(self) -> bool:
-        """Demo when explicitly enabled or when no football-data token is set."""
         if self.demo_mode:
             return True
         return not bool(self.football_data_api_token)

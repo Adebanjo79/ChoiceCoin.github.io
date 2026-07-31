@@ -15,8 +15,11 @@ COMMANDS = [
     {"command": "start", "description": "Welcome + how to use"},
     {"command": "help", "description": "List commands"},
     {"command": "status", "description": "Bot health / last scan"},
-    {"command": "tips", "description": "Latest safety ~3.0 tips"},
-    {"command": "safety", "description": "Refresh safety 3-odd tips now"},
+    {"command": "tips", "description": "Full board: 3 / 5 / 50 odds"},
+    {"command": "3odd", "description": "Best ≈3.0 odds tips"},
+    {"command": "5odd", "description": "Best ≈5.0 odds tips"},
+    {"command": "50odd", "description": "Best ≈50 odds longshots"},
+    {"command": "safety", "description": "Refresh all bands now"},
     {"command": "ping", "description": "Quick alive check"},
 ]
 
@@ -30,12 +33,14 @@ class TelegramCommandBot:
         allowed_chat_ids: set[str],
         on_safety_refresh: Callable[[], str] | None = None,
         on_tips: Callable[[], str] | None = None,
+        on_band: Callable[[str], str] | None = None,
     ) -> None:
         self.telegram = telegram
         self.status = status
         self.allowed_chat_ids = {str(c).strip() for c in allowed_chat_ids if str(c).strip()}
         self.on_safety_refresh = on_safety_refresh
         self.on_tips = on_tips
+        self.on_band = on_band
 
     def setup(self) -> None:
         if not self.telegram.bot_ready:
@@ -48,7 +53,6 @@ class TelegramCommandBot:
 
     def allowed(self, chat_id: str) -> bool:
         if not self.allowed_chat_ids:
-            # If no allow-list configured, accept first chat and lock to it via env chat id
             return True
         return str(chat_id) in self.allowed_chat_ids
 
@@ -69,24 +73,26 @@ class TelegramCommandBot:
             )
             return
 
-        # Remember chat if alerter had none
         if not self.telegram.chat_id:
             self.telegram.chat_id = chat_id
 
-        cmd = text.split()[0].split("@")[0].lower()
+        cmd = parse_command(text)
         reply = self._dispatch(cmd)
         self.telegram.send(reply, chat_id=chat_id)
 
     def _dispatch(self, cmd: str) -> str:
         if cmd in {"/start", "/help"}:
             return (
-                "⚽ Football Safety Tips Bot\n"
-                "Daily ≈3.0 odds picks with high confidence.\n\n"
+                "⚽ Football Odds Bot\n"
+                "Best sourced tips for ≈3 / ≈5 / ≈50 odds with confidence.\n\n"
                 "Commands:\n"
-                "/status — bot health & last scan\n"
-                "/tips — show latest safety tips\n"
-                "/safety — run a fresh safety scan now\n"
-                "/ping — quick alive check\n\n"
+                "/tips — full daily board\n"
+                "/3odd — best ≈3.0 safety tips\n"
+                "/5odd — best ≈5.0 value tips\n"
+                "/50odd — best ≈50 longshots (correct scores)\n"
+                "/safety — refresh scan now\n"
+                "/status — bot health\n"
+                "/ping — alive check\n\n"
                 "Not betting advice."
             )
         if cmd == "/ping":
@@ -97,6 +103,18 @@ class TelegramCommandBot:
             if self.on_tips:
                 return self.on_tips()
             return self.status.last_tips_summary or "No tips cached yet. Use /safety"
+        if cmd in {"/3odd", "/3", "/safety3"}:
+            if self.on_band:
+                return self.on_band("3odd")
+            return "3-odd tips unavailable."
+        if cmd in {"/5odd", "/5"}:
+            if self.on_band:
+                return self.on_band("5odd")
+            return "5-odd tips unavailable."
+        if cmd in {"/50odd", "/50"}:
+            if self.on_band:
+                return self.on_band("50odd")
+            return "50-odd tips unavailable."
         if cmd == "/safety":
             if self.on_safety_refresh:
                 return self.on_safety_refresh()
@@ -114,7 +132,6 @@ class TelegramCommandBot:
 
 
 def parse_command(text: str) -> str:
-    """Normalize '/tips@MyBot extra' → '/tips'."""
     if not text:
         return ""
     first = text.strip().split()[0]

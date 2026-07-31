@@ -17,9 +17,9 @@ Covers **Premier League, La Liga, Bundesliga, Ligue 1, Serie A, Eredivisie, Prim
 python main.py --daemon
 ```
 
-- Pushes **🛡️ SAFETY 3-ODD DAILY TIPS** every day (`RUN_HOUR_UTC`)
+- Daily board with **best ≈3 / ≈5 / ≈50 odds** tips + confidence
 - Heartbeat `/status` every `STATUS_INTERVAL_HOURS` (default 6h)
-- Commands: `/status` `/tips` `/safety` `/ping` `/help`
+- Commands: `/tips` `/3odd` `/5odd` `/50odd` `/safety` `/status` `/ping`
 
 ---
 

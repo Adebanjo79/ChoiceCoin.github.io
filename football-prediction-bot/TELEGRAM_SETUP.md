@@ -61,12 +61,15 @@ Detach: `Ctrl+B` then `D`
 | When | What |
 |------|------|
 | Bot starts | Online notice |
-| Every day at `RUN_HOUR_UTC` | 🛡️ Safety 3-odd tips (or “no tips”) |
+| Every day at `RUN_HOUR_UTC` | Full board: best ≈3 / ≈5 / ≈50 odds |
 | Every `STATUS_INTERVAL_HOURS` | 📡 Status heartbeat |
-| You send `/status` | Live health / last scan |
-| You send `/tips` | Latest cached safety tips |
-| You send `/safety` | Fresh scan + tips now |
-| You send `/ping` | Quick alive check |
+| `/tips` | Full multi-band board |
+| `/3odd` | Best ≈3.0 safety tips |
+| `/5odd` | Best ≈5.0 value tips |
+| `/50odd` | Best ≈50 longshots (correct scores) |
+| `/safety` | Fresh scan of all bands |
+| `/status` | Live health / last scan |
+| `/ping` | Quick alive check |
 
 ## Commands
 
@@ -75,6 +78,9 @@ Detach: `Ctrl+B` then `D`
 /help
 /status
 /tips
+/3odd
+/5odd
+/50odd
 /safety
 /ping
 ```
