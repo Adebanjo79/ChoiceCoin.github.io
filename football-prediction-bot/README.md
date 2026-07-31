@@ -17,6 +17,8 @@ Covers **Premier League, La Liga, Bundesliga, Ligue 1, Serie A, Eredivisie, Prim
 python main.py --daemon
 ```
 
+- Uses fixtures from the **next 3 days only** (`DAYS_AHEAD=3`)
+- Every leg shows full **date + kickoff (UTC)**
 - **Safest ≈3.0** accumulators using **1, 2 or 3 games**
 - **≈5.0** accumulators using **4+ games**
 - **≈50** accumulators using **7+ games**

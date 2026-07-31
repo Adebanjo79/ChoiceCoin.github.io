@@ -115,15 +115,26 @@ class PredictionScanner:
         }
 
     def load_fixtures(self) -> list[Fixture]:
+        days = max(1, int(self.settings.days_ahead))
         if self.settings.use_demo() or self.fd is None:
-            logger.info("Using DEMO fixtures (set FOOTBALL_DATA_API_TOKEN for live data)")
+            logger.info(
+                "Using DEMO fixtures within next %s day(s) "
+                "(set FOOTBALL_DATA_API_TOKEN for live data)",
+                days,
+            )
+            from datetime import timedelta, timezone
+
+            now = datetime.now(timezone.utc)
+            cutoff = now + timedelta(days=days)
             fixtures = demo_fixtures()
             codes = set(self.settings.leagues)
-            return [f for f in fixtures if f.league_code in codes]
+            return [
+                f
+                for f in fixtures
+                if f.league_code in codes and now <= f.kickoff <= cutoff
+            ]
 
-        return self.fd.upcoming_fixtures(
-            self.settings.leagues, days_ahead=self.settings.days_ahead
-        )
+        return self.fd.upcoming_fixtures(self.settings.leagues, days_ahead=days)
 
     def load_forms(self, fixtures: list[Fixture]) -> tuple[dict[str, TeamForm], dict[str, TeamForm]]:
         by_id: dict[str, TeamForm] = {}

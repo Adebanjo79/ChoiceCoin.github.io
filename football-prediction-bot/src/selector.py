@@ -173,11 +173,10 @@ def format_daily_report(
     for i, tip in enumerate(tips, start=1):
         p = tip.prediction
         f = tip.fixture
-        kick = f.kickoff.strftime("%Y-%m-%d %H:%M UTC")
         lines.extend(
             [
                 f"{i}. [{f.league_name}] {f.label}",
-                f"   Kickoff: {kick}",
+                f"   Date: {f.kickoff_str}",
                 f"   Pick: {p.market_label}",
                 f"   Odds: {p.display_odds:.2f} | Confidence: {p.confidence:.0f}% "
                 f"| Model P: {p.probability * 100:.1f}%",
@@ -213,13 +212,13 @@ def format_multi_band_report(
         for i, tip in enumerate(tips, start=1):
             p = tip.prediction
             f = tip.fixture
-            kick = f.kickoff.strftime("%m-%d %H:%M UTC")
             lines.append(
                 f"  {i}. [{f.league_code}] {f.home_team} vs {f.away_team}"
             )
+            lines.append(f"     Date: {f.kickoff_str}")
             lines.append(
                 f"     {p.market_label} @ {p.display_odds:.2f} | "
-                f"Conf {p.confidence:.0f}% | P {p.probability * 100:.1f}% | {kick}"
+                f"Conf {p.confidence:.0f}% | P {p.probability * 100:.1f}%"
             )
     lines.append("")
     lines.append("Not betting advice. /3odd /5odd /50odd /status")

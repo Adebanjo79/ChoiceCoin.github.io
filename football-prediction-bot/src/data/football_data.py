@@ -46,10 +46,14 @@ class FootballDataClient:
         resp.raise_for_status()
         return resp.json()
 
-    def upcoming_fixtures(self, league_codes: list[str], days_ahead: int = 30) -> list[Fixture]:
-        date_from = datetime.now(timezone.utc).date().isoformat()
-        date_to = (datetime.now(timezone.utc) + timedelta(days=days_ahead)).date().isoformat()
+    def upcoming_fixtures(self, league_codes: list[str], days_ahead: int = 3) -> list[Fixture]:
+        """Load scheduled matches from today through the next `days_ahead` days."""
+        days_ahead = max(1, int(days_ahead))
+        now = datetime.now(timezone.utc)
+        date_from = now.date().isoformat()
+        date_to = (now + timedelta(days=days_ahead)).date().isoformat()
         fixtures: list[Fixture] = []
+        cutoff = now + timedelta(days=days_ahead)
         for code in league_codes:
             try:
                 data = self._get(
@@ -59,9 +63,13 @@ class FootballDataClient:
             except Exception as exc:  # noqa: BLE001 — keep other leagues going
                 logger.warning("Failed fixtures for %s: %s", code, exc)
                 continue
+            loaded = 0
             for match in data.get("matches", []):
-                fixtures.append(self._parse_fixture(match, code))
-            logger.info("Loaded %s fixtures for %s", len(data.get("matches", [])), code)
+                fixture = self._parse_fixture(match, code)
+                if fixture.kickoff <= cutoff:
+                    fixtures.append(fixture)
+                    loaded += 1
+            logger.info("Loaded %s fixtures for %s (next %sd)", loaded, code, days_ahead)
         fixtures.sort(key=lambda f: f.kickoff)
         return fixtures
 

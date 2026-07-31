@@ -338,6 +338,7 @@ def format_accumulator_report(
     lines = [
         "⚽ DAILY ACCA BOARD",
         "Safest multi-game tickets → ≈3 / ≈5 / ≈50 combined odds",
+        "Fixtures window: next 3 days (see each leg date)",
         "─" * 36,
     ]
     order = ["3odd", "5odd", "50odd"]
@@ -361,13 +362,13 @@ def format_accumulator_report(
             for i, leg in enumerate(acc.legs, start=1):
                 p = leg.prediction
                 f = leg.fixture
-                kick = f.kickoff.strftime("%m-%d %H:%M")
                 lines.append(
                     f"     {i}. [{f.league_code}] {f.home_team} vs {f.away_team}"
                 )
+                lines.append(f"        Date: {f.kickoff_str}")
                 lines.append(
                     f"        {p.market_label} @{p.display_odds:.2f} "
-                    f"(conf {p.confidence:.0f}%) {kick} UTC"
+                    f"(conf {p.confidence:.0f}%)"
                 )
     lines.append("")
     lines.append("Not betting advice. Accumulators lose if any leg fails.")
@@ -380,6 +381,7 @@ def format_band_accus(accus: list[Accumulator], spec: AccaSpec) -> str:
         spec.title,
         f"Target combined odds ≈ {spec.target_odds:.1f} (±{spec.tolerance:.1f})",
         f"Legs allowed: {spec.min_legs}–{spec.max_legs} | conf ≥ {spec.min_confidence:.0f}%",
+        "Each fixture shows full date + kickoff (UTC)",
         "─" * 36,
     ]
     if not accus:
@@ -394,9 +396,10 @@ def format_band_accus(accus: list[Accumulator], spec: AccaSpec) -> str:
         for i, leg in enumerate(acc.legs, start=1):
             p = leg.prediction
             f = leg.fixture
+            lines.append(f"  {i}. [{f.league_code}] {f.label}")
+            lines.append(f"     Date: {f.kickoff_str}")
             lines.append(
-                f"  {i}. [{f.league_code}] {f.label} — {p.market_label} "
-                f"@{p.display_odds:.2f} ({p.confidence:.0f}%)"
+                f"     {p.market_label} @{p.display_odds:.2f} (conf {p.confidence:.0f}%)"
             )
     lines.append("")
     lines.append("Not betting advice. One losing leg kills the accumulator.")

@@ -82,6 +82,16 @@ class Fixture:
     def label(self) -> str:
         return f"{self.home_team} vs {self.away_team}"
 
+    @property
+    def date_str(self) -> str:
+        """Human date for tips, e.g. Sat 02 Aug 2026."""
+        return self.kickoff.strftime("%a %d %b %Y")
+
+    @property
+    def kickoff_str(self) -> str:
+        """Full kickoff stamp, e.g. Sat 02 Aug 2026 15:00 UTC."""
+        return self.kickoff.strftime("%a %d %b %Y %H:%M UTC")
+
 
 @dataclass
 class MarketPrediction:
@@ -115,7 +125,9 @@ class Tip:
             "league": f.league_name,
             "league_code": f.league_code,
             "match": f.label,
+            "date": f.date_str,
             "kickoff": f.kickoff.isoformat(),
+            "kickoff_display": f.kickoff_str,
             "market": p.market_label,
             "market_key": p.market,
             "confidence": round(p.confidence, 1),
