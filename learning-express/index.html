@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>The Soft & Bright Learning Express</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f7fbff;
+      --ink: #243047;
+      --muted: #5f6d86;
+      --card: #ffffff;
+      --red: #ff5a5a;
+      --yellow: #ffd84d;
+      --green: #5fd08a;
+      --blue: #5cb8ff;
+      --purple: #b48cff;
+      --orange: #ff9a4d;
+      --shadow: 0 18px 40px rgba(40, 55, 90, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      font-family: "Nunito", system-ui, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 15%, #ffe8c8 0%, transparent 40%),
+        radial-gradient(circle at 90% 10%, #d7f0ff 0%, transparent 42%),
+        radial-gradient(circle at 70% 95%, #ffe0ef 0%, transparent 45%),
+        linear-gradient(160deg, #f7fbff, #fff8f2 60%, #f4fff8);
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1.1rem 1rem 2rem;
+    }
+
+    header {
+      width: min(760px, 100%);
+      text-align: center;
+      margin-bottom: 0.9rem;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.45rem, 4.8vw, 2.2rem);
+      font-weight: 900;
+    }
+
+    .subtitle {
+      margin: 0.35rem 0 0;
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 0.98rem;
+    }
+
+    .card {
+      width: min(760px, 100%);
+      background: var(--card);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .image-wrap {
+      aspect-ratio: 1;
+      background: #eef6ff;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .image-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: opacity 0.4s ease, transform 0.45s ease;
+    }
+
+    .image-wrap img.swap {
+      opacity: 0;
+      transform: scale(0.975);
+    }
+
+    .progress {
+      height: 6px;
+      background: #edf2fa;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--blue), var(--green), var(--yellow));
+      transition: width 0.1s linear;
+    }
+
+    .caption {
+      padding: 1rem 1.2rem 1.25rem;
+      text-align: center;
+    }
+
+    .scene-tag {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .lesson {
+      margin: 0.35rem 0 0;
+      font-size: clamp(1.55rem, 6vw, 2.4rem);
+      font-weight: 900;
+      line-height: 1.1;
+    }
+
+    .say {
+      margin: 0.45rem 0 0;
+      color: var(--red);
+      font-size: clamp(1.05rem, 3.8vw, 1.4rem);
+      font-weight: 800;
+    }
+
+    .hint {
+      margin: 0.4rem 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+
+    .controls {
+      width: min(760px, 100%);
+      display: grid;
+      grid-template-columns: 1fr 1.15fr 1fr;
+      gap: 0.7rem;
+      margin-top: 0.95rem;
+    }
+
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 0.9rem 1rem;
+      font: inherit;
+      font-weight: 800;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: transform 0.15s ease, opacity 0.2s ease, background 0.2s ease;
+      box-shadow: var(--shadow);
+      background: #fff;
+      color: var(--ink);
+    }
+
+    button:active { transform: scale(0.97); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #playBtn {
+      background: linear-gradient(135deg, var(--orange), var(--yellow));
+      color: #2b2a33;
+    }
+
+    #speakBtn {
+      width: min(760px, 100%);
+      margin-top: 0.7rem;
+      background: linear-gradient(135deg, var(--blue), var(--purple));
+      color: #fff;
+    }
+
+    .acts {
+      width: min(760px, 100%);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      justify-content: center;
+      margin-top: 1rem;
+    }
+
+    .acts button {
+      padding: 0.55rem 0.8rem;
+      font-size: 0.85rem;
+      box-shadow: 0 8px 18px rgba(40, 55, 90, 0.08);
+    }
+
+    .dots {
+      width: min(760px, 100%);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      justify-content: center;
+      margin-top: 0.9rem;
+    }
+
+    .dots button {
+      width: 2rem;
+      height: 2rem;
+      padding: 0;
+      font-size: 0.78rem;
+      box-shadow: 0 6px 14px rgba(40, 55, 90, 0.08);
+    }
+
+    .dots button[aria-current="true"] {
+      background: var(--blue);
+      color: #123;
+      transform: scale(1.08);
+    }
+
+    .grid-link {
+      margin-top: 1.1rem;
+      text-decoration: none;
+      color: var(--ink);
+      font-weight: 800;
+      background: #fff;
+      padding: 0.7rem 1.1rem;
+      border-radius: 999px;
+      box-shadow: var(--shadow);
+    }
+
+    #grid {
+      width: min(980px, 100%);
+      display: none;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 0.8rem;
+      margin-top: 1.3rem;
+    }
+
+    #grid.show { display: grid; }
+
+    #grid a {
+      text-decoration: none;
+      color: inherit;
+      background: #fff;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    #grid img {
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: cover;
+      display: block;
+    }
+
+    #grid p {
+      margin: 0;
+      padding: 0.5rem 0.55rem 0.65rem;
+      text-align: center;
+      font-weight: 800;
+      font-size: 0.88rem;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>The Soft & Bright Learning Express</h1>
+    <p class="subtitle">30 gentle scenes · 10 seconds each · Ages 6–12 months</p>
+  </header>
+
+  <section class="card" aria-live="polite">
+    <div class="image-wrap">
+      <img id="cardImage" src="images/scene-01-red-engine.png" alt="Scene 1: Red train engine" />
+    </div>
+    <div class="progress" aria-hidden="true"><span id="bar"></span></div>
+    <div class="caption">
+      <p class="scene-tag" id="sceneTag">Act 1 · Scene 1</p>
+      <p class="lesson" id="lesson">Train</p>
+      <p class="say" id="say">Look! A train! Choo-choo!</p>
+      <p class="hint" id="hint">Point to the smiling engine</p>
+    </div>
+  </section>
+
+  <div class="controls">
+    <button id="prevBtn" type="button">← Back</button>
+    <button id="playBtn" type="button">Play 5 min</button>
+    <button id="nextBtn" type="button">Next →</button>
+  </div>
+  <button id="speakBtn" type="button">Say it slowly</button>
+
+  <div class="acts" id="acts"></div>
+  <div class="dots" id="dots" aria-label="Jump to scene"></div>
+  <a class="grid-link" href="#all" id="gridToggle">See all 30 scenes</a>
+  <section id="grid" aria-label="All Learning Express scenes"></section>
+
+  <script>
+    const SCENE_MS = 10000;
+
+    const scenes = [
+      { file: "scene-01-red-engine.png", act: 1, lesson: "Train", say: "Look! A train! Choo-choo!", hint: "Point to the smiling engine", speak: "Look! A train! Choo choo!" },
+      { file: "scene-02-car1-number1.png", act: 1, lesson: "One", say: "One! Number one! Yellow car… one!", hint: "Count: 1", speak: "One. Number one. Yellow car. One." },
+      { file: "scene-03-car2-number2.png", act: 1, lesson: "Two", say: "Two! Number two! Blue car… two!", hint: "Count: 2", speak: "Two. Number two. Blue car. Two." },
+      { file: "scene-04-car3-number3.png", act: 1, lesson: "Three", say: "Three! Number three! Green car… three!", hint: "Count: 3", speak: "Three. Number three. Green car. Three." },
+      { file: "scene-05-cars4-5-numbers.png", act: 1, lesson: "Four & Five", say: "Four… and five! Four… five!", hint: "Count: 4, 5", speak: "Four. And five. Four. Five." },
+      { file: "scene-06-all-five-cars.png", act: 1, lesson: "1–5", say: "One… two… three… four… five!", hint: "Count the whole train", speak: "One. Two. Three. Four. Five." },
+      { file: "scene-07-red-engine-closeup.png", act: 2, lesson: "Red", say: "Red! Red engine! Hello, red!", hint: "Pause and say: Red", speak: "Red. Red engine. Hello, red." },
+      { file: "scene-08-red-apple-cargo.png", act: 2, lesson: "Red Apple", say: "Red apple! Yum, yum, yum!", hint: "Color + object", speak: "Red apple. Yum yum yum." },
+      { file: "scene-09-yellow-banana-cargo.png", act: 2, lesson: "Yellow", say: "Yellow banana! Yellow!", hint: "Color + object", speak: "Yellow banana. Yellow." },
+      { file: "scene-10-green-leaf-cargo.png", act: 2, lesson: "Green", say: "Green leaf! Soft green leaf!", hint: "Color + object", speak: "Green leaf. Soft green leaf." },
+      { file: "scene-11-purple-orange-cargo.png", act: 2, lesson: "Purple & Orange", say: "Purple grape… orange fruit!", hint: "Two colors", speak: "Purple. Orange." },
+      { file: "scene-12-hello-cow.png", act: 2, lesson: "Cow", say: "Hello, cow! Moo~", hint: "Animal sound", speak: "Hello, cow. Moo." },
+      { file: "scene-13-circle-tunnel.png", act: 3, lesson: "Circle", say: "Circle! Round circle.", hint: "Round shape", speak: "Circle. Round circle." },
+      { file: "scene-14-triangle.png", act: 3, lesson: "Triangle", say: "Triangle! One, two, three points!", hint: "Three points", speak: "Triangle. One, two, three points." },
+      { file: "scene-15-square.png", act: 3, lesson: "Square", say: "Square! A flat blue square!", hint: "Four sides", speak: "Square. A flat blue square." },
+      { file: "scene-16-star.png", act: 3, lesson: "Star", say: "Star! Twinkle, twinkle star!", hint: "Look up", speak: "Star. Twinkle twinkle star." },
+      { file: "scene-17-wheel-circle.png", act: 3, lesson: "Wheel = Circle", say: "Look! The wheel is a… circle!", hint: "Shape in real life", speak: "Look. The wheel is a circle." },
+      { file: "scene-18-shapes-dance.png", act: 3, lesson: "All Shapes", say: "Circle, triangle, square, star!", hint: "Name each shape", speak: "Circle. Triangle. Square. Star." },
+      { file: "scene-19-red-light-stop.png", act: 4, lesson: "Stop", say: "Red light says… stop!", hint: "Cause and effect", speak: "Red light says stop." },
+      { file: "scene-20-duck-family.png", act: 4, lesson: "Duck", say: "Quack, quack, quack!", hint: "Animal sound", speak: "Quack. Quack. Quack." },
+      { file: "scene-21-green-light-go.png", act: 4, lesson: "Go", say: "Green light says… go! Go, train, go!", hint: "Cause and effect", speak: "Green light says go. Go train go." },
+      { file: "scene-22-ring-bell.png", act: 4, lesson: "Bell", say: "Ring the bell! Ding-dong!", hint: "Sound trigger", speak: "Ring the bell. Ding dong." },
+      { file: "scene-23-puff-clouds.png", act: 4, lesson: "Clouds", say: "Puff, puff, puff… white clouds!", hint: "Soft sounds", speak: "Puff puff puff. White clouds." },
+      { file: "scene-24-chug-trees.png", act: 4, lesson: "Chug", say: "Chug-chug… chug-chug…", hint: "Rhythm", speak: "Chug chug. Chug chug." },
+      { file: "scene-25-numbers-recap.png", act: 5, lesson: "Numbers Recap", say: "1… 2… 3… 4… 5!", hint: "Count slowly", speak: "One. Two. Three. Four. Five." },
+      { file: "scene-26-color-blocks.png", act: 5, lesson: "Colors Recap", say: "So many colors! Pretty colors!", hint: "Name colors", speak: "Red. Yellow. Green. Purple. Orange." },
+      { file: "scene-27-shapes-bye.png", act: 5, lesson: "Bye Shapes", say: "Bye-bye circle… bye-bye star!", hint: "Wave goodbye", speak: "Bye bye circle. Bye bye star." },
+      { file: "scene-28-sunset-moon.png", act: 5, lesson: "Moon", say: "Sunset time… sleep, sleep train…", hint: "Quiet voice", speak: "Sunset time. Sleep sleep train." },
+      { file: "scene-29-sleepy-train.png", act: 5, lesson: "Nighty-night", say: "Shh… nighty-night, train…", hint: "Whisper", speak: "Shh. Nighty night, train." },
+      { file: "scene-30-sweet-dreams.png", act: 5, lesson: "Sweet Dreams", say: "Sweet dreams, little learner!", hint: "End softly", speak: "Sweet dreams, little learner." }
+    ];
+
+    const actNames = {
+      1: "Train & Numbers",
+      2: "Colors & Cargo",
+      3: "Simple Shapes",
+      4: "Sounds & Movement",
+      5: "Recap & Quiet Time"
+    };
+
+    let index = 0;
+    let playing = false;
+    let timer = null;
+    let startedAt = 0;
+    let raf = null;
+
+    const img = document.getElementById("cardImage");
+    const sceneTag = document.getElementById("sceneTag");
+    const lesson = document.getElementById("lesson");
+    const say = document.getElementById("say");
+    const hint = document.getElementById("hint");
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const playBtn = document.getElementById("playBtn");
+    const speakBtn = document.getElementById("speakBtn");
+    const bar = document.getElementById("bar");
+    const dots = document.getElementById("dots");
+    const acts = document.getElementById("acts");
+    const grid = document.getElementById("grid");
+    const gridToggle = document.getElementById("gridToggle");
+
+    function stopPlay() {
+      playing = false;
+      clearTimeout(timer);
+      cancelAnimationFrame(raf);
+      playBtn.textContent = "Play 5 min";
+      bar.style.width = "0%";
+    }
+
+    function tickBar() {
+      if (!playing) return;
+      const elapsed = Date.now() - startedAt;
+      bar.style.width = `${Math.min(100, (elapsed / SCENE_MS) * 100)}%`;
+      raf = requestAnimationFrame(tickBar);
+    }
+
+    function scheduleNext() {
+      clearTimeout(timer);
+      startedAt = Date.now();
+      cancelAnimationFrame(raf);
+      tickBar();
+      timer = setTimeout(() => {
+        if (index >= scenes.length - 1) {
+          stopPlay();
+          return;
+        }
+        render(index + 1);
+        scheduleNext();
+      }, SCENE_MS);
+    }
+
+    function render(i, animate = true) {
+      index = Math.max(0, Math.min(scenes.length - 1, i));
+      const scene = scenes[index];
+      const apply = () => {
+        img.src = `images/${scene.file}`;
+        img.alt = `Scene ${index + 1}: ${scene.lesson}`;
+        sceneTag.textContent = `Act ${scene.act} · Scene ${index + 1}`;
+        lesson.textContent = scene.lesson;
+        say.textContent = scene.say;
+        hint.textContent = scene.hint;
+        prevBtn.disabled = index === 0;
+        nextBtn.disabled = index === scenes.length - 1;
+        [...dots.children].forEach((btn, n) => {
+          btn.setAttribute("aria-current", n === index ? "true" : "false");
+        });
+        if (animate) img.classList.remove("swap");
+      };
+      if (animate) {
+        img.classList.add("swap");
+        setTimeout(apply, 180);
+      } else {
+        apply();
+      }
+    }
+
+    scenes.forEach((scene, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = String(i + 1);
+      btn.setAttribute("aria-label", `Scene ${i + 1}`);
+      btn.addEventListener("click", () => {
+        stopPlay();
+        render(i);
+      });
+      dots.appendChild(btn);
+
+      const link = document.createElement("a");
+      link.href = `#scene-${i + 1}`;
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        stopPlay();
+        render(i);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+      link.innerHTML = `<img src="images/${scene.file}" alt="" loading="lazy" /><p>${i + 1}. ${scene.lesson}</p>`;
+      grid.appendChild(link);
+    });
+
+    [1, 2, 3, 4, 5].forEach((act) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = `Act ${act}: ${actNames[act]}`;
+      btn.addEventListener("click", () => {
+        stopPlay();
+        const start = scenes.findIndex((s) => s.act === act);
+        render(start);
+      });
+      acts.appendChild(btn);
+    });
+
+    prevBtn.addEventListener("click", () => {
+      stopPlay();
+      render(index - 1);
+    });
+    nextBtn.addEventListener("click", () => {
+      stopPlay();
+      render(index + 1);
+    });
+
+    playBtn.addEventListener("click", () => {
+      if (playing) {
+        stopPlay();
+        return;
+      }
+      playing = true;
+      playBtn.textContent = "Pause";
+      if (index === scenes.length - 1) render(0, false);
+      scheduleNext();
+    });
+
+    speakBtn.addEventListener("click", () => {
+      if (!("speechSynthesis" in window)) return;
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(scenes[index].speak);
+      utter.rate = 0.72;
+      utter.pitch = 1.15;
+      window.speechSynthesis.speak(utter);
+    });
+
+    gridToggle.addEventListener("click", (e) => {
+      e.preventDefault();
+      const open = grid.classList.toggle("show");
+      gridToggle.textContent = open ? "Hide all scenes" : "See all 30 scenes";
+      if (open) grid.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight") {
+        stopPlay();
+        render(index + 1);
+      }
+      if (e.key === "ArrowLeft") {
+        stopPlay();
+        render(index - 1);
+      }
+      if (e.key === " ") {
+        e.preventDefault();
+        playBtn.click();
+      }
+    });
+
+    let touchX = null;
+    document.querySelector(".card").addEventListener("touchstart", (e) => {
+      touchX = e.changedTouches[0].screenX;
+    }, { passive: true });
+    document.querySelector(".card").addEventListener("touchend", (e) => {
+      if (touchX === null) return;
+      const dx = e.changedTouches[0].screenX - touchX;
+      if (Math.abs(dx) > 40) {
+        stopPlay();
+        render(index + (dx < 0 ? 1 : -1));
+      }
+      touchX = null;
+    }, { passive: true });
+
+    render(0, false);
+  </script>
+</body>
+</html>
