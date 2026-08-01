@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Baby ABC Flashcards · D–Z</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #fff8f2;
+      --ink: #2b2a33;
+      --muted: #6b6570;
+      --card: #ffffff;
+      --accent: #ff8a5c;
+      --accent-2: #6ec6ff;
+      --soft: #ffe3d3;
+      --shadow: 0 18px 40px rgba(60, 40, 30, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      font-family: "Nunito", system-ui, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 18%, #ffe8c8 0%, transparent 42%),
+        radial-gradient(circle at 88% 12%, #d8f0ff 0%, transparent 40%),
+        radial-gradient(circle at 70% 90%, #ffd6e8 0%, transparent 45%),
+        linear-gradient(160deg, #fff8f2, #f3fbff 55%, #fff4f8);
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1.25rem 1rem 2rem;
+    }
+
+    header {
+      width: min(720px, 100%);
+      text-align: center;
+      margin-bottom: 1rem;
+      animation: rise 0.7s ease-out both;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.6rem, 5vw, 2.4rem);
+      font-weight: 900;
+      letter-spacing: 0.02em;
+    }
+
+    .subtitle {
+      margin: 0.4rem 0 0;
+      color: var(--muted);
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .card {
+      width: min(720px, 100%);
+      background: var(--card);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      animation: pop 0.55s ease-out both;
+    }
+
+    .image-wrap {
+      position: relative;
+      aspect-ratio: 1;
+      background: var(--soft);
+      overflow: hidden;
+    }
+
+    .image-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: opacity 0.35s ease, transform 0.45s ease;
+    }
+
+    .image-wrap img.swap {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+
+    .caption {
+      padding: 1.1rem 1.25rem 1.35rem;
+      text-align: center;
+    }
+
+    .letter-say {
+      margin: 0;
+      font-size: clamp(2rem, 8vw, 3.4rem);
+      font-weight: 900;
+      line-height: 1.05;
+      letter-spacing: 0.04em;
+    }
+
+    .word-say {
+      margin: 0.35rem 0 0;
+      font-size: clamp(1.25rem, 4.5vw, 1.8rem);
+      font-weight: 800;
+      color: var(--accent);
+    }
+
+    .hint {
+      margin: 0.55rem 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+      font-weight: 700;
+    }
+
+    .controls {
+      width: min(720px, 100%);
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1rem;
+      animation: rise 0.8s ease-out both;
+    }
+
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 0.95rem 1.1rem;
+      font: inherit;
+      font-weight: 800;
+      font-size: 1.05rem;
+      cursor: pointer;
+      transition: transform 0.15s ease, background 0.2s ease, opacity 0.2s ease;
+    }
+
+    button:active { transform: scale(0.97); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .nav {
+      flex: 1;
+      background: #fff;
+      color: var(--ink);
+      box-shadow: var(--shadow);
+    }
+
+    .nav:hover { background: #fff6ef; }
+
+    .speak {
+      flex: 1.2;
+      background: linear-gradient(135deg, var(--accent), #ffb347);
+      color: #fff;
+      box-shadow: 0 12px 28px rgba(255, 138, 92, 0.35);
+    }
+
+    .dots {
+      width: min(720px, 100%);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      justify-content: center;
+      margin-top: 1.1rem;
+    }
+
+    .dots button {
+      width: 2.1rem;
+      height: 2.1rem;
+      padding: 0;
+      border-radius: 50%;
+      background: #fff;
+      color: var(--ink);
+      box-shadow: 0 6px 14px rgba(60, 40, 30, 0.08);
+      font-size: 0.85rem;
+    }
+
+    .dots button[aria-current="true"] {
+      background: var(--accent-2);
+      color: #123;
+      transform: scale(1.08);
+    }
+
+    .grid-link {
+      margin-top: 1.25rem;
+      font-weight: 800;
+      color: var(--ink);
+      text-decoration: none;
+      background: #fff;
+      padding: 0.7rem 1.1rem;
+      border-radius: 999px;
+      box-shadow: var(--shadow);
+    }
+
+    #grid {
+      width: min(960px, 100%);
+      display: none;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 0.85rem;
+      margin-top: 1.5rem;
+    }
+
+    #grid.show { display: grid; }
+
+    #grid a {
+      text-decoration: none;
+      color: inherit;
+      background: #fff;
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      transition: transform 0.15s ease;
+    }
+
+    #grid a:hover { transform: translateY(-2px); }
+
+    #grid img {
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: cover;
+      display: block;
+    }
+
+    #grid p {
+      margin: 0;
+      padding: 0.55rem 0.6rem 0.7rem;
+      text-align: center;
+      font-weight: 800;
+      font-size: 0.95rem;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes pop {
+      from { opacity: 0; transform: scale(0.97); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Baby ABC Flashcards</h1>
+    <p class="subtitle">Soft, bright letters for ages 6–12 months · A to Z</p>
+  </header>
+
+  <section class="card" aria-live="polite">
+    <div class="image-wrap">
+      <img id="cardImage" src="images/letter-a-apple.png" alt="Letter A for Apple" />
+    </div>
+    <div class="caption">
+      <p class="letter-say" id="letterSay">A</p>
+      <p class="word-say" id="wordSay">A is for Apple</p>
+      <p class="hint" id="hintSay">Look! A!</p>
+    </div>
+  </section>
+
+  <div class="controls">
+    <button class="nav" id="prevBtn" type="button" aria-label="Previous letter">← Back</button>
+    <button class="speak" id="speakBtn" type="button" aria-label="Say the letter">Say it</button>
+    <button class="nav" id="nextBtn" type="button" aria-label="Next letter">Next →</button>
+  </div>
+
+  <div class="dots" id="dots" aria-label="Jump to letter"></div>
+  <a class="grid-link" href="#all" id="gridToggle">See all letters</a>
+
+  <section id="grid" aria-label="All alphabet flashcards"></section>
+
+  <script>
+    const cards = [
+      { letter: "A", word: "Apple", file: "letter-a-apple.png", hint: "Look! A!" },
+      { letter: "B", word: "Ball", file: "letter-b-ball.png", hint: "B! Bounce, bounce, B!" },
+      { letter: "C", word: "Cat", file: "letter-c-cat.png", hint: "C! Cute little C!" },
+      { letter: "D", word: "Duck", file: "letter-d-duck.png", hint: "Look! D!" },
+      { letter: "E", word: "Elephant", file: "letter-e-elephant.png", hint: "E! Hello, E!" },
+      { letter: "F", word: "Fish", file: "letter-f-fish.png", hint: "F! Floating F." },
+      { letter: "G", word: "Giraffe", file: "letter-g-giraffe.png", hint: "G! Bright and happy G!" },
+      { letter: "H", word: "House", file: "letter-h-house.png", hint: "H! Hop, hop, H!" },
+      { letter: "I", word: "Ice Cream", file: "letter-i-icecream.png", hint: "I! Cool and tall I." },
+      { letter: "J", word: "Juice", file: "letter-j-juice.png", hint: "J! Jump, jump, J!" },
+      { letter: "K", word: "Kite", file: "letter-k-kite.png", hint: "K! High in the sky, K!" },
+      { letter: "L", word: "Leaf", file: "letter-l-leaf.png", hint: "L! Lovely L!" },
+      { letter: "M", word: "Moon", file: "letter-m-moon.png", hint: "M! Sleepy M." },
+      { letter: "N", word: "Nest", file: "letter-n-nest.png", hint: "N! Cozy N." },
+      { letter: "O", word: "Octopus", file: "letter-o-octopus.png", hint: "O! Round, round O!" },
+      { letter: "P", word: "Penguin", file: "letter-p-penguin.png", hint: "P! Pop! Hello, P!" },
+      { letter: "Q", word: "Quilt", file: "letter-q-quilt.png", hint: "Q! Pretty Q!" },
+      { letter: "R", word: "Rainbow", file: "letter-r-rainbow.png", hint: "R! Colorful R!" },
+      { letter: "S", word: "Sun", file: "letter-s-sun.png", hint: "S! Warm S!" },
+      { letter: "T", word: "Tree", file: "letter-t-tree.png", hint: "T! Tall, strong T!" },
+      { letter: "U", word: "Umbrella", file: "letter-u-umbrella.png", hint: "U! Up, up, U!" },
+      { letter: "V", word: "Van", file: "letter-v-van.png", hint: "V! Vroom, vroom, V!" },
+      { letter: "W", word: "Whale", file: "letter-w-whale.png", hint: "W! Splash! It’s W!" },
+      { letter: "X", word: "Xylophone", file: "letter-x-xylophone.png", hint: "X! Look at X!" },
+      { letter: "Y", word: "Yarn", file: "letter-y-yarn.png", hint: "Y! Cozy, sleepy Y." },
+      { letter: "Z", word: "Zebra", file: "letter-z-zebra.png", hint: "Z! Zig-zag Z!" },
+      { letter: "★", word: "The End", file: "alphabet-finale-the-end.png", hint: "You learned your ABCs! Good job, baby!" }
+    ];
+
+    let index = 0;
+    const img = document.getElementById("cardImage");
+    const letterSay = document.getElementById("letterSay");
+    const wordSay = document.getElementById("wordSay");
+    const hintSay = document.getElementById("hintSay");
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const speakBtn = document.getElementById("speakBtn");
+    const dots = document.getElementById("dots");
+    const grid = document.getElementById("grid");
+    const gridToggle = document.getElementById("gridToggle");
+
+    function render(i, animate = true) {
+      index = Math.max(0, Math.min(cards.length - 1, i));
+      const card = cards[index];
+      const apply = () => {
+        img.src = `images/${card.file}`;
+        img.alt = card.letter === "★"
+          ? "Alphabet grand finale — The End"
+          : `Letter ${card.letter} for ${card.word}`;
+        letterSay.textContent = card.letter;
+        wordSay.textContent = card.letter === "★"
+          ? "You learned your ABCs!"
+          : `${card.letter} is for ${card.word}`;
+        hintSay.textContent = card.hint;
+        prevBtn.disabled = index === 0;
+        nextBtn.disabled = index === cards.length - 1;
+        [...dots.children].forEach((btn, n) => {
+          btn.setAttribute("aria-current", n === index ? "true" : "false");
+        });
+        if (animate) img.classList.remove("swap");
+      };
+
+      if (animate) {
+        img.classList.add("swap");
+        setTimeout(apply, 180);
+      } else {
+        apply();
+      }
+    }
+
+    cards.forEach((card, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = card.letter === "★" ? "★" : card.letter;
+      btn.setAttribute("aria-label", card.letter === "★" ? "Finale" : `Letter ${card.letter}`);
+      btn.addEventListener("click", () => render(i));
+      dots.appendChild(btn);
+
+      const link = document.createElement("a");
+      link.href = `#${card.letter}`;
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        render(i);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+      link.innerHTML = `<img src="images/${card.file}" alt="" loading="lazy" /><p>${
+        card.letter === "★" ? "The End" : `${card.letter} · ${card.word}`
+      }</p>`;
+      grid.appendChild(link);
+    });
+
+    prevBtn.addEventListener("click", () => render(index - 1));
+    nextBtn.addEventListener("click", () => render(index + 1));
+
+    speakBtn.addEventListener("click", () => {
+      const card = cards[index];
+      const text = card.letter === "★"
+        ? "You learned your A B C's! Good job, baby! Time to say bye-bye!"
+        : `${card.letter}. ${card.letter} is for ${card.word}.`;
+      if (!("speechSynthesis" in window)) return;
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.rate = 0.78;
+      utter.pitch = 1.1;
+      window.speechSynthesis.speak(utter);
+    });
+
+    gridToggle.addEventListener("click", (e) => {
+      e.preventDefault();
+      const open = grid.classList.toggle("show");
+      gridToggle.textContent = open ? "Hide all letters" : "See all letters";
+      if (open) grid.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight") render(index + 1);
+      if (e.key === "ArrowLeft") render(index - 1);
+      if (e.key === " ") {
+        e.preventDefault();
+        speakBtn.click();
+      }
+    });
+
+    let touchX = null;
+    document.querySelector(".card").addEventListener("touchstart", (e) => {
+      touchX = e.changedTouches[0].screenX;
+    }, { passive: true });
+    document.querySelector(".card").addEventListener("touchend", (e) => {
+      if (touchX === null) return;
+      const dx = e.changedTouches[0].screenX - touchX;
+      if (Math.abs(dx) > 40) render(index + (dx < 0 ? 1 : -1));
+      touchX = null;
+    }, { passive: true });
+
+    render(0, false);
+  </script>
+</body>
+</html>
