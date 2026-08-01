@@ -4,7 +4,7 @@ Soft, low-stimulation alphabet flashcards for babies ages **6–12 months**, mat
 
 ## What’s included
 
-- **24 square learning images** for letters **D–Z**, plus a calm **grand finale**
+- **27 square learning images** for letters **A–Z**, plus a calm **grand finale**
 - One clear letter + one matching object per card
 - Bright, high-contrast colors on soft pastel backgrounds
 - Simple HTML viewer with large type, slow speech readout, and swipe/next controls
@@ -13,6 +13,9 @@ Soft, low-stimulation alphabet flashcards for babies ages **6–12 months**, mat
 
 | Letter | Word | File |
 |--------|------|------|
+| A | Apple | `images/letter-a-apple.png` |
+| B | Ball | `images/letter-b-ball.png` |
+| C | Cat | `images/letter-c-cat.png` |
 | D | Duck | `images/letter-d-duck.png` |
 | E | Elephant | `images/letter-e-elephant.png` |
 | F | Fish | `images/letter-f-fish.png` |
@@ -46,7 +49,7 @@ Tips for 6–12 months:
 
 1. Show **one card at a time** for 10–20 seconds
 2. Point to the big letter, then the picture
-3. Repeat slowly: **“D… D is for Duck”**
+3. Repeat slowly: **“A… A is for Apple”**
 4. Keep sessions short and calm
 
 ## Design notes
