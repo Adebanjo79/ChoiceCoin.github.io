@@ -124,6 +124,11 @@ class Settings:
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     telegram_bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
     telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
+    # SportyBet.com real booking / share codes (requires curl_cffi)
+    sportybet_enabled: bool = field(default_factory=lambda: _env_bool("SPORTYBET_ENABLED", True))
+    sportybet_country: str = field(
+        default_factory=lambda: os.getenv("SPORTYBET_COUNTRY", "ng").strip().lower() or "ng"
+    )
     football_data_base_url: str = "https://api.football-data.org/v4"
     odds_api_base_url: str = "https://api.the-odds-api.com/v4"
 

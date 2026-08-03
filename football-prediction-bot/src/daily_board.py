@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from src.models import Fixture, Tip
 from src.selector import OddsBand, select_best_for_band
-from src.sportingbet import sportingbet_code, sportingbet_lines, sportingbet_selection
+from src.sportingbet import sportingbet_selection
+from src.sportybet import SportyBetBooking
 
 
 @dataclass
@@ -17,6 +18,7 @@ class DailyBoard:
     tips_5: list[Tip]
     tips_50: list[Tip]
     day_label: str
+    band_codes: dict[str, SportyBetBooking] = field(default_factory=dict)
 
 
 def band_defs_from_settings(settings) -> dict[str, OddsBand]:
@@ -65,11 +67,42 @@ def build_daily_board(fixtures: list[Fixture], all_tips: list[Tip], settings) ->
     )
 
 
-def _format_tip_block(tips: list[Tip], title: str, target: float, min_conf: float) -> list[str]:
+def _format_booking_lines(tip: Tip) -> list[str]:
+    lines: list[str] = []
+    if tip.sportybet_code:
+        lines.append(f"     SportyBet code: {tip.sportybet_code}")
+        if tip.sportybet_url:
+            lines.append(f"     Load: {tip.sportybet_url}")
+    else:
+        lines.append("     SportyBet code: (not matched — search match on sportybet.com)")
+    return lines
+
+
+def _format_band_header_code(band_key: str, band_codes: dict[str, SportyBetBooking]) -> list[str]:
+    booking = band_codes.get(band_key)
+    if not booking:
+        return []
+    return [
+        f"  SportyBet BOOKING CODE: {booking.share_code}  ({booking.matched} legs)",
+        f"  Load: {booking.share_url}",
+    ]
+
+
+def _format_tip_block(
+    tips: list[Tip],
+    title: str,
+    target: float,
+    min_conf: float,
+    *,
+    band_key: str = "",
+    band_codes: dict[str, SportyBetBooking] | None = None,
+) -> list[str]:
     lines = [
         title,
         f"Target ≈ {target:.1f} | confidence ≥ {min_conf:.0f}% | picks {len(tips)}",
     ]
+    if band_codes and band_key:
+        lines.extend(_format_band_header_code(band_key, band_codes))
     if not tips:
         lines.append("  (no qualifying daily tip)")
         return lines
@@ -83,8 +116,8 @@ def _format_tip_block(tips: list[Tip], title: str, target: float, min_conf: floa
             f"     Pick: {p.market_label} [{sb_code}] @ {p.display_odds:.2f} | "
             f"Conf {p.confidence:.0f}%"
         )
-        lines.append(f"     Sportingbet: {sb_market}")
-        lines.append(f"     SB Code: {sportingbet_code(tip)}")
+        lines.append(f"     Market: {sb_market}")
+        lines.extend(_format_booking_lines(tip))
     return lines
 
 
@@ -94,6 +127,7 @@ def format_daily_odds_report(board: DailyBoard, settings) -> str:
         f"Day: {board.day_label}",
         f"Fixtures today: {len(board.fixtures)}",
         "Bands: ≈3.0 · ≈5.0 · ≈50 (singles from today's matches)",
+        "SportyBet: load booking code in betslip → Booking Code → Load",
         "─" * 36,
     ]
 
@@ -117,6 +151,8 @@ def format_daily_odds_report(board: DailyBoard, settings) -> str:
             "🛡️ DAILY ≈3.0 ODDS",
             settings.target_odds,
             settings.safety_min_confidence,
+            band_key="3odd",
+            band_codes=board.band_codes,
         )
     )
     lines.append("")
@@ -126,6 +162,8 @@ def format_daily_odds_report(board: DailyBoard, settings) -> str:
             "🎯 DAILY ≈5.0 ODDS",
             settings.target_odds_5,
             settings.odd5_min_confidence,
+            band_key="5odd",
+            band_codes=board.band_codes,
         )
     )
     lines.append("")
@@ -135,19 +173,36 @@ def format_daily_odds_report(board: DailyBoard, settings) -> str:
             "🚀 DAILY ≈50 ODDS",
             settings.target_odds_50,
             settings.odd50_min_confidence,
+            band_key="50odd",
+            band_codes=board.band_codes,
         )
     )
     lines.append("")
     lines.append("Not betting advice. Stake responsibly.")
-    lines.append("SB Code = Sportingbet helper (search market by code).")
+    lines.append("SportyBet codes load the exact pick(s) on sportybet.com.")
     lines.append("Telegram: /tips /fixtures /3odd /5odd /50odd /status")
     return "\n".join(lines)
 
 
-def format_band_singles(tips: list[Tip], title: str, target: float, min_conf: float) -> str:
-    lines = _format_tip_block(tips, title, target, min_conf)
+def format_band_singles(
+    tips: list[Tip],
+    title: str,
+    target: float,
+    min_conf: float,
+    *,
+    band_key: str = "",
+    band_codes: dict[str, SportyBetBooking] | None = None,
+) -> str:
+    lines = _format_tip_block(
+        tips,
+        title,
+        target,
+        min_conf,
+        band_key=band_key,
+        band_codes=band_codes,
+    )
     lines.append("")
-    lines.append("Each tip includes Date + Sportingbet code for easy placement.")
+    lines.append("Paste SportyBet code → Betslip → Booking Code → Load.")
     lines.append("Not betting advice.")
     return "\n".join(lines)
 

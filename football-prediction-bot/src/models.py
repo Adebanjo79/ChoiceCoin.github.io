@@ -114,6 +114,8 @@ class Tip:
     fixture: Fixture
     prediction: MarketPrediction
     rank_score: float = 0.0
+    sportybet_code: str | None = None
+    sportybet_url: str | None = None
 
     def is_actionable(self, min_confidence: float = 70.0) -> bool:
         return self.prediction.confidence >= min_confidence
@@ -136,6 +138,8 @@ class Tip:
             "sportingbet_code": sb_code,
             "sportingbet_market": sb_market,
             "sportingbet_slip": sportingbet_code(self),
+            "sportybet_code": self.sportybet_code,
+            "sportybet_url": self.sportybet_url,
             "confidence": round(p.confidence, 1),
             "probability": round(p.probability * 100, 1),
             "odds": round(p.display_odds, 2),

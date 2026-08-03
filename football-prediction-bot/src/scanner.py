@@ -24,6 +24,12 @@ from src.data.football_data import FootballDataClient
 from src.data.odds_api import OddsApiClient
 from src.models import Fixture, TeamForm, Tip
 from src.runtime_status import RuntimeStatus
+from src.sportybet import (
+    SportyBetClient,
+    attach_sportybet_codes,
+    book_band_codes,
+    sportybet_enabled,
+)
 from src.telegram_alerter import TelegramAlerter
 from src.telegram_bot import TelegramCommandBot
 from src.time_window import in_daily_window, local_day_bounds
@@ -187,6 +193,34 @@ class PredictionScanner:
         self.run_daily(push_telegram=True)
         return self._cached_report
 
+    def _attach_sportybet(self, board: DailyBoard) -> None:
+        if not sportybet_enabled(self.settings):
+            logger.info("SportyBet booking codes disabled")
+            return
+        client = SportyBetClient(country=self.settings.sportybet_country)
+        tips = [*board.tips_3, *board.tips_5, *board.tips_50]
+        attach_sportybet_codes(
+            tips,
+            country=self.settings.sportybet_country,
+            client=client,
+        )
+        board.band_codes = book_band_codes(
+            {
+                "3odd": board.tips_3,
+                "5odd": board.tips_5,
+                "50odd": board.tips_50,
+            },
+            country=self.settings.sportybet_country,
+            client=client,
+        )
+        coded = sum(1 for t in tips if t.sportybet_code)
+        logger.info(
+            "SportyBet: %d/%d tip codes, band codes=%s",
+            coded,
+            len(tips),
+            {k: v.share_code for k, v in board.band_codes.items()},
+        )
+
     def run_daily(self, *, push_telegram: bool = True) -> list[Tip]:
         self.status.mark_scan_start()
         try:
@@ -194,6 +228,7 @@ class PredictionScanner:
             board = build_daily_board(fixtures, all_tips, self.settings)
             _, _, day_label = local_day_bounds(self.settings.timezone_name)
             board.day_label = day_label
+            self._attach_sportybet(board)
             report = format_daily_odds_report(board, self.settings)
             fixtures_report = format_fixtures_list(fixtures, day_label)
 
@@ -207,18 +242,24 @@ class PredictionScanner:
                     "🛡️ DAILY ≈3.0 ODDS",
                     self.settings.target_odds,
                     self.settings.safety_min_confidence,
+                    band_key="3odd",
+                    band_codes=board.band_codes,
                 ),
                 "5odd": format_band_singles(
                     board.tips_5,
                     "🎯 DAILY ≈5.0 ODDS",
                     self.settings.target_odds_5,
                     self.settings.odd5_min_confidence,
+                    band_key="5odd",
+                    band_codes=board.band_codes,
                 ),
                 "50odd": format_band_singles(
                     board.tips_50,
                     "🚀 DAILY ≈50 ODDS",
                     self.settings.target_odds_50,
                     self.settings.odd50_min_confidence,
+                    band_key="50odd",
+                    band_codes=board.band_codes,
                 ),
                 "fixtures": fixtures_report,
             }

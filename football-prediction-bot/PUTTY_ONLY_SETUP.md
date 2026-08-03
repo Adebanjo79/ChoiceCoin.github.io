@@ -97,9 +97,11 @@ DAILY_INCLUDE_NEXT_HOURS=24
 DAYS_AHEAD=1
 MIN_CONFIDENCE=70
 TARGET_ODDS=3.0
+SPORTYBET_ENABLED=true
+SPORTYBET_COUNTRY=ng
 ```
 
-In nano:
+Tips include **SportyBet.com booking codes** you can paste into the SportyBet betslip (Booking Code → Load).
 - Move with arrow keys
 - Paste token with **right-click**
 - Save: `Ctrl+O` → Enter

@@ -19,6 +19,7 @@ python main.py --daemon
 
 - Uses **today's fixtures** (`DAILY_ONLY=true`, timezone `Africa/Lagos` + next 24h)
 - Daily singles for **≈3 / ≈5 / ≈50 odds**, each with full **date + kickoff**
+- **SportyBet.com booking codes** on each tip + one multi code per odds band (load in betslip)
 - Commands: `/tips` `/fixtures` `/3odd` `/5odd` `/50odd` `/safety` `/status` `/ping`
 
 ---
@@ -79,7 +80,13 @@ MAX_DAILY_TIPS=5
 LEAGUES=PL,PD,BL1,FL1,SA,DED,PPL,ELC,CL
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
+SPORTYBET_ENABLED=true
+SPORTYBET_COUNTRY=ng
 ```
+
+SportyBet codes: each tip gets a loadable **booking code**. Each ≈3 / ≈5 / ≈50 band also gets a multi code. Paste into SportyBet → Betslip → Booking Code → Load.
+
+Requires `curl_cffi` (installed via `requirements.txt`). Set `SPORTYBET_ENABLED=false` to skip.
 
 Then:
 
