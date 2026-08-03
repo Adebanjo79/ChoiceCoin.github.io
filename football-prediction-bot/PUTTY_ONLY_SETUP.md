@@ -162,10 +162,16 @@ python main.py --test-telegram
 ```
 
 On Telegram you can always send:
+- `/menu` — full command list
+- `/fixtures` — today's matches
+- `/tips` — full board (≈3 / ≈5 / ≈50)
+- `/3odd` `/5odd` `/50odd` — each odds band
+- `/codes` — SportyBet booking codes only
+- `/safety` — refresh tips + codes now
 - `/status` — bot health
-- `/tips` — latest safety 3-odd tips
-- `/safety` — refresh tips now
 - `/ping` — alive check
+
+Full guide: **[TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)**
 
 ## Step 9 — Run 24/7 (survive closing PuTTY)
 
