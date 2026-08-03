@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from src.models import Fixture, Tip
 from src.selector import OddsBand, select_best_for_band
+from src.sportingbet import sportingbet_code, sportingbet_lines, sportingbet_selection
 
 
 @dataclass
@@ -75,12 +76,15 @@ def _format_tip_block(tips: list[Tip], title: str, target: float, min_conf: floa
     for i, tip in enumerate(tips, start=1):
         p = tip.prediction
         f = tip.fixture
+        sb_code, sb_market = sportingbet_selection(p.market)
         lines.append(f"  {i}. [{f.league_code}] {f.home_team} vs {f.away_team}")
         lines.append(f"     Date: {f.kickoff_str}")
         lines.append(
-            f"     Pick: {p.market_label} @ {p.display_odds:.2f} | "
-            f"Conf {p.confidence:.0f}% | P {p.probability * 100:.1f}%"
+            f"     Pick: {p.market_label} [{sb_code}] @ {p.display_odds:.2f} | "
+            f"Conf {p.confidence:.0f}%"
         )
+        lines.append(f"     Sportingbet: {sb_market}")
+        lines.append(f"     SB Code: {sportingbet_code(tip)}")
     return lines
 
 
@@ -99,9 +103,12 @@ def format_daily_odds_report(board: DailyBoard, settings) -> str:
         lines.append("  No upcoming fixtures found for today.")
         lines.append("  Tip: check API token / leagues, or try again later.")
     else:
-        for f in board.fixtures[:40]:
+        preview = board.fixtures[:12]
+        for f in preview:
             lines.append(f"  • [{f.league_code}] {f.label}")
             lines.append(f"    Date: {f.kickoff_str}")
+        if len(board.fixtures) > 12:
+            lines.append(f"  … +{len(board.fixtures) - 12} more (use /fixtures)")
 
     lines.append("")
     lines.extend(
@@ -132,14 +139,15 @@ def format_daily_odds_report(board: DailyBoard, settings) -> str:
     )
     lines.append("")
     lines.append("Not betting advice. Stake responsibly.")
-    lines.append("Telegram: /tips /3odd /5odd /50odd /fixtures /status")
+    lines.append("SB Code = Sportingbet helper (search market by code).")
+    lines.append("Telegram: /tips /fixtures /3odd /5odd /50odd /status")
     return "\n".join(lines)
 
 
 def format_band_singles(tips: list[Tip], title: str, target: float, min_conf: float) -> str:
     lines = _format_tip_block(tips, title, target, min_conf)
     lines.append("")
-    lines.append("Each tip is from today's fixture list and includes the match date.")
+    lines.append("Each tip includes Date + Sportingbet code for easy placement.")
     lines.append("Not betting advice.")
     return "\n".join(lines)
 

@@ -119,8 +119,11 @@ class Tip:
         return self.prediction.confidence >= min_confidence
 
     def to_dict(self) -> dict[str, Any]:
+        from src.sportingbet import sportingbet_code, sportingbet_selection
+
         p = self.prediction
         f = self.fixture
+        sb_code, sb_market = sportingbet_selection(p.market)
         return {
             "league": f.league_name,
             "league_code": f.league_code,
@@ -130,6 +133,9 @@ class Tip:
             "kickoff_display": f.kickoff_str,
             "market": p.market_label,
             "market_key": p.market,
+            "sportingbet_code": sb_code,
+            "sportingbet_market": sb_market,
+            "sportingbet_slip": sportingbet_code(self),
             "confidence": round(p.confidence, 1),
             "probability": round(p.probability * 100, 1),
             "odds": round(p.display_odds, 2),
