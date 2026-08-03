@@ -483,6 +483,7 @@ def parse_ebay_card(card, category_name):
         "Title": title,
         "Price": price,
         "Sold": sold,
+        "Ebay_Rank": None,  # filled after scrape by sold order
         "Amazon_Rank": None,
         "Link": link,
         "Mega_Seller": sold >= MEGA_SOLD_THRESHOLD,
@@ -494,15 +495,26 @@ def scrape_ebay(driver):
     for category, queries in EBAY_SEARCHES.items():
         print(f"\n[eBay / {category}]")
         for query in queries:
+            kept_in_query = 0
             for card in search_ebay(driver, query):
                 try:
                     item = parse_ebay_card(card, category)
                     if item:
+                        # Temporary search-page position among kept cards
+                        kept_in_query += 1
+                        item["Ebay_Search_Pos"] = kept_in_query
                         items.append(item)
                 except Exception as e:
                     print(f"    skip card: {e}")
             time.sleep(SLEEP_BETWEEN_PAGES)
-    return items
+
+    # Final eBay rank = #1 most sold in this scan (100+ sold only already)
+    ebay_only = [i for i in items if i.get("Sold", 0) >= MIN_SOLD]
+    ebay_only.sort(key=lambda x: x["Sold"], reverse=True)
+    for rank, item in enumerate(ebay_only, start=1):
+        item["Ebay_Rank"] = rank
+    print(f"eBay items with {MIN_SOLD}+ sold: {len(ebay_only)}")
+    return ebay_only
 
 
 # =============================================================================
@@ -586,8 +598,9 @@ def scrape_amazon_bestsellers(driver):
                     if price < MIN_PRICE or price > MAX_PRICE:
                         continue
 
-                    # Map reviews -> synthetic "sold proxy" for scoring only
-                    sold_proxy = max(reviews, 100)
+                    # Amazon does not show sold count — require 100+ reviews as demand floor
+                    if reviews < MIN_SOLD:
+                        continue
 
                     items.append(
                         {
@@ -595,8 +608,9 @@ def scrape_amazon_bestsellers(driver):
                             "Category": category,
                             "Title": title,
                             "Price": price,
-                            "Sold": sold_proxy,  # reviews used as demand proxy
-                            "Amazon_Rank": idx,
+                            "Sold": reviews,  # reviews used as demand proxy (100+)
+                            "Ebay_Rank": None,
+                            "Amazon_Rank": idx,  # bestseller chart rank
                             "Link": link,
                             "Mega_Seller": False,
                             "Reviews": reviews,
@@ -655,24 +669,41 @@ def _safe_int(value, default=0):
     return int(_safe_float(value, default))
 
 
+def format_rank(value, label):
+    """Format rank for Telegram, e.g. 'eBay Rank: #4' or 'Amazon Rank: n/a'."""
+    number = _safe_float(value, default=float("nan"))
+    if math.isnan(number) or number <= 0:
+        return f"{label}: n/a"
+    return f"{label}: #{int(number)}"
+
+
 def format_top_results_message(df_top):
-    lines = ["Dropship Sources (eBay + Amazon UK)\n"]
+    """Telegram list with eBay/Amazon ranks so you can verify products yourself."""
+    lines = [
+        "Dropship Sources (eBay + Amazon UK)",
+        f"Rule: every product has {MIN_SOLD}+ sold (eBay) or {MIN_SOLD}+ reviews (Amazon)\n",
+    ]
     for i, row in enumerate(df_top.itertuples(index=False), start=1):
         title = str(row.Title)[:80]
-        source = getattr(row, "Source", "eBay UK")
+        source = str(getattr(row, "Source", "eBay UK"))
         sold_pct = _safe_float(getattr(row, "Sold_Percent", 0))
         conf = _safe_float(getattr(row, "Confidence", 0))
-        rank = getattr(row, "Amazon_Rank", None)
-        rank_val = _safe_float(rank, default=float("nan"))
-        rank_bit = "" if math.isnan(rank_val) or rank_val <= 0 else f" | AMZ#{int(rank_val)}"
-        sold_label = "Reviews~" if str(source).startswith("Amazon") else "Sold"
         profit = _safe_float(getattr(row, "Profit", 0))
         trend = _safe_float(getattr(row, "Trend_Change", 0))
         sold = _safe_int(getattr(row, "Sold", 0))
+        ebay_rank = format_rank(getattr(row, "Ebay_Rank", None), "eBay Rank")
+        amz_rank = format_rank(getattr(row, "Amazon_Rank", None), "Amazon Rank")
+
+        if source.startswith("Amazon"):
+            demand_line = f"Reviews: {sold}+ (100+ required) ({sold_pct}%) | Confidence: {conf}%"
+        else:
+            demand_line = f"Sold: {sold}+ (100+ required) ({sold_pct}%) | Confidence: {conf}%"
+
         lines.append(
             f"{i}. [{source}] {title}\n"
-            f"   Profit: £{profit:.2f} | Trend: {trend}%{rank_bit}\n"
-            f"   {sold_label}: {sold} ({sold_pct}%) | Confidence: {conf}%\n"
+            f"   {ebay_rank} | {amz_rank}\n"
+            f"   Profit: £{profit:.2f} | Trend: {trend}%\n"
+            f"   {demand_line}\n"
             f"   {row.Link}\n"
         )
     return "\n".join(lines)
@@ -765,6 +796,7 @@ def find_winners():
         "Price",
         "Sold",
         "Sold_Percent",
+        "Ebay_Rank",
         "Amazon_Rank",
         "Link",
         "Mega_Seller",
@@ -792,8 +824,24 @@ def find_winners():
         unique.append(item)
     all_items = unique
 
+    # Hard rule: only keep 100+ sold (eBay) / 100+ reviews (Amazon)
+    all_items = [i for i in all_items if _safe_int(i.get("Sold", 0)) >= MIN_SOLD]
+    if not all_items:
+        pd.DataFrame(columns=empty_cols).to_csv(CSV_PATH, index=False)
+        send_telegram_message(
+            f"Dropship bot: no products with {MIN_SOLD}+ sold/reviews this run."
+        )
+        print("Bot Finished. Found 0 winners")
+        return 0
+
+    # Recompute eBay ranks on the deduped 100+ set
+    ebay_items = [i for i in all_items if str(i.get("Source", "")).startswith("eBay")]
+    ebay_items.sort(key=lambda x: x.get("Sold", 0), reverse=True)
+    for rank, item in enumerate(ebay_items, start=1):
+        item["Ebay_Rank"] = rank
+
     max_sold = max((i["Sold"] for i in all_items), default=0)
-    print(f"\nUnique sourced products: {len(all_items)} (max demand proxy: {max_sold})")
+    print(f"\nUnique 100+ products: {len(all_items)} (max demand: {max_sold})")
 
     winners = []
     for item in all_items:
@@ -802,14 +850,16 @@ def find_winners():
                 continue
             if item["Price"] < MIN_PRICE or item["Price"] > MAX_PRICE:
                 continue
+            if _safe_int(item.get("Sold", 0)) < MIN_SOLD:
+                continue
 
             ali_price = estimate_ali_price(item["Price"])
             profit, margin = calc_profit_and_margin(item["Price"], ali_price)
 
-            if item["Sold"] < MIN_SOLD or profit < MIN_PROFIT or margin < MIN_MARGIN:
+            if profit < MIN_PROFIT or margin < MIN_MARGIN:
                 print(
-                    f"skip: {item['Source']} | {item['Title'][:45]} | "
-                    f"sold/proxy={item['Sold']} profit=£{profit} margin={margin*100:.1f}%"
+                    f"skip money: {item['Source']} | {item['Title'][:45]} | "
+                    f"sold={item['Sold']} profit=£{profit} margin={margin*100:.1f}%"
                 )
                 continue
 
@@ -838,6 +888,8 @@ def find_winners():
             winners.append(
                 {
                     **item,
+                    "Ebay_Rank": item.get("Ebay_Rank"),
+                    "Amazon_Rank": item.get("Amazon_Rank"),
                     "Sold_Percent": sold_pct,
                     "Ali_Price": ali_price,
                     "Profit": profit,
@@ -848,8 +900,8 @@ def find_winners():
                 }
             )
             print(
-                f"  WINNER [{item['Source']}] conf={confidence}% "
-                f"profit=£{profit} sold%={sold_pct}"
+                f"  WINNER [{item['Source']}] eBay#{item.get('Ebay_Rank')} "
+                f"AMZ#{item.get('Amazon_Rank')} sold={item['Sold']} conf={confidence}%"
             )
         except Exception as e:
             print(f"  item error: {e}")
@@ -857,7 +909,7 @@ def find_winners():
     df = pd.DataFrame(winners)
     if not df.empty:
         df = df.sort_values(
-            by=["Confidence", "Profit", "Sold"],
+            by=["Confidence", "Sold", "Profit"],
             ascending=[False, False, False],
         )
     else:
@@ -867,11 +919,12 @@ def find_winners():
     print(f"\nSaved {len(df)} winners to {CSV_PATH}")
 
     if not df.empty:
-        send_telegram_message(format_top_results_message(df.head(5)))
+        # Send more products so you can check ranks yourself
+        send_telegram_message(format_top_results_message(df.head(8)))
     else:
         send_telegram_message(
             "Dropship bot: no clean winners this run "
-            "(junk filtered / money filters / scrape blocked)."
+            f"(need {MIN_SOLD}+ sold/reviews + profit filters)."
         )
 
     BOT_STATUS["last_trends_limited"] = _TRENDS_RATE_LIMITED
