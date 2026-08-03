@@ -54,26 +54,34 @@ class FootballDataClient:
         daily_only: bool = True,
         timezone_name: str = "Africa/Lagos",
         include_next_hours: int = 24,
+        empty_day_fallback_days: int = 21,
     ) -> list[Fixture]:
-        """Load upcoming fixtures. Default: today's matches (local TZ) + next hours."""
+        """Load upcoming fixtures. Default: today's matches (local TZ) + next hours.
+
+        If the daily window is empty (common in off-season), automatically widen
+        to the next scheduled matches within empty_day_fallback_days.
+        """
         from src.time_window import in_daily_window, local_day_bounds
 
         days_ahead = max(1, int(days_ahead))
         now = datetime.now(timezone.utc)
+        fallback_days = max(0, int(empty_day_fallback_days))
 
         if daily_only:
             start_utc, end_utc, day_label = local_day_bounds(timezone_name)
-            # API date range must cover local day in UTC (+ rolling hours)
             roll_end = now + timedelta(hours=max(0, include_next_hours))
             date_from = min(start_utc, now).date().isoformat()
-            date_to = max(end_utc, roll_end).date().isoformat()
+            # Prefetch a wider API range so we can fall back without extra calls
+            prefetch_end = now + timedelta(days=max(fallback_days, 1))
+            date_to = max(end_utc, roll_end, prefetch_end).date().isoformat()
             window_label = f"daily/{day_label}"
         else:
             date_from = now.date().isoformat()
             date_to = (now + timedelta(days=days_ahead)).date().isoformat()
             window_label = f"next {days_ahead}d"
+            fallback_days = 0
 
-        fixtures: list[Fixture] = []
+        all_upcoming: list[Fixture] = []
         for code in league_codes:
             try:
                 data = self._get(
@@ -83,21 +91,63 @@ class FootballDataClient:
             except Exception as exc:  # noqa: BLE001 — keep other leagues going
                 logger.warning("Failed fixtures for %s: %s", code, exc)
                 continue
-            loaded = 0
             for match in data.get("matches", []):
                 fixture = self._parse_fixture(match, code)
                 if fixture.kickoff < now:
                     continue
-                if daily_only and not in_daily_window(
-                    fixture.kickoff,
+                all_upcoming.append(fixture)
+
+        if daily_only:
+            fixtures = [
+                f
+                for f in all_upcoming
+                if in_daily_window(
+                    f.kickoff,
                     tz_name=timezone_name,
                     include_next_hours=include_next_hours,
                     now=now,
-                ):
-                    continue
-                fixtures.append(fixture)
-                loaded += 1
-            logger.info("Loaded %s fixtures for %s (%s)", loaded, code, window_label)
+                )
+            ]
+            if not fixtures and fallback_days > 0:
+                limit = now + timedelta(days=fallback_days)
+                fixtures = [f for f in all_upcoming if f.kickoff <= limit]
+                if fixtures:
+                    first = min(fixtures, key=lambda f: f.kickoff)
+                    last = max(fixtures, key=lambda f: f.kickoff)
+                    window_label = (
+                        f"fallback/next {fallback_days}d "
+                        f"({first.kickoff.strftime('%d %b')}–{last.kickoff.strftime('%d %b')})"
+                    )
+                    logger.info(
+                        "No fixtures today — using next %d days (%d matches, from %s)",
+                        fallback_days,
+                        len(fixtures),
+                        first.kickoff_str,
+                    )
+            # Log per-league counts for the chosen set
+            by_league: dict[str, int] = {}
+            for f in fixtures:
+                by_league[f.league_code] = by_league.get(f.league_code, 0) + 1
+            for code in league_codes:
+                logger.info(
+                    "Loaded %s fixtures for %s (%s)",
+                    by_league.get(code, 0),
+                    code,
+                    window_label,
+                )
+        else:
+            fixtures = list(all_upcoming)
+            by_league = {}
+            for f in fixtures:
+                by_league[f.league_code] = by_league.get(f.league_code, 0) + 1
+            for code in league_codes:
+                logger.info(
+                    "Loaded %s fixtures for %s (%s)",
+                    by_league.get(code, 0),
+                    code,
+                    window_label,
+                )
+
         fixtures.sort(key=lambda f: f.kickoff)
         return fixtures
 

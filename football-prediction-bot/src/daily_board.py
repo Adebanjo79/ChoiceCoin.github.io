@@ -125,17 +125,27 @@ def format_daily_odds_report(board: DailyBoard, settings) -> str:
     lines = [
         "⚽ DAILY FIXTURE ODDS",
         f"Day: {board.day_label}",
-        f"Fixtures today: {len(board.fixtures)}",
-        "Bands: ≈3.0 · ≈5.0 · ≈50 (singles from today's matches)",
+        f"Fixtures loaded: {len(board.fixtures)}",
+        "Bands: ≈3.0 · ≈5.0 · ≈50 (singles)",
         "SportyBet: load booking code in betslip → Booking Code → Load",
         "─" * 36,
     ]
 
+    # Off-season / empty today: clarify that we show the next slate
+    if board.fixtures:
+        first = board.fixtures[0]
+        last = board.fixtures[-1]
+        if first.date_str != board.day_label:
+            lines.append(
+                f"ℹ️ No matches on {board.day_label} — showing next slate "
+                f"{first.kickoff.strftime('%d %b')}→{last.kickoff.strftime('%d %b')}"
+            )
+
     lines.append("")
-    lines.append("📅 TODAY'S FIXTURES")
+    lines.append("📅 FIXTURES")
     if not board.fixtures:
-        lines.append("  No upcoming fixtures found for today.")
-        lines.append("  Tip: check API token / leagues, or try again later.")
+        lines.append("  No upcoming fixtures in window.")
+        lines.append("  Tip: raise EMPTY_DAY_FALLBACK_DAYS or check API token / leagues.")
     else:
         preview = board.fixtures[:12]
         for f in preview:

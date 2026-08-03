@@ -119,6 +119,10 @@ class Settings:
     daily_include_next_hours: int = field(
         default_factory=lambda: _env_int("DAILY_INCLUDE_NEXT_HOURS", 24)
     )
+    # If today has 0 fixtures (off-season / midweek), load next upcoming within N days
+    empty_day_fallback_days: int = field(
+        default_factory=lambda: _env_int("EMPTY_DAY_FALLBACK_DAYS", 21)
+    )
     status_interval_hours: int = field(default_factory=lambda: _env_int("STATUS_INTERVAL_HOURS", 6))
     telegram_poll_seconds: int = field(default_factory=lambda: _env_int("TELEGRAM_POLL_SECONDS", 5))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))

@@ -93,23 +93,29 @@ class PredictionScanner:
             now = datetime.now(timezone.utc)
             fixtures = demo_fixtures()
             codes = set(self.settings.leagues)
-            out: list[Fixture] = []
+            upcoming: list[Fixture] = []
             for f in fixtures:
                 if f.league_code not in codes:
                     continue
                 if f.kickoff < now:
                     continue
-                if daily:
-                    if not in_daily_window(
+                upcoming.append(f)
+            if daily:
+                out = [
+                    f
+                    for f in upcoming
+                    if in_daily_window(
                         f.kickoff,
                         tz_name=tz_name,
                         include_next_hours=hours,
                         now=now,
-                    ):
-                        continue
-                elif f.kickoff > now + timedelta(days=days):
-                    continue
-                out.append(f)
+                    )
+                ]
+                if not out and self.settings.empty_day_fallback_days > 0:
+                    limit = now + timedelta(days=self.settings.empty_day_fallback_days)
+                    out = [f for f in upcoming if f.kickoff <= limit]
+            else:
+                out = [f for f in upcoming if f.kickoff <= now + timedelta(days=days)]
             return out
 
         return self.fd.upcoming_fixtures(
@@ -118,6 +124,7 @@ class PredictionScanner:
             daily_only=daily,
             timezone_name=tz_name,
             include_next_hours=hours,
+            empty_day_fallback_days=self.settings.empty_day_fallback_days,
         )
 
     def load_forms(self, fixtures: list[Fixture]) -> tuple[dict[str, TeamForm], dict[str, TeamForm]]:

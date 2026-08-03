@@ -94,6 +94,7 @@ DEMO_MODE=false
 DAILY_ONLY=true
 TIMEZONE=Africa/Lagos
 DAILY_INCLUDE_NEXT_HOURS=24
+EMPTY_DAY_FALLBACK_DAYS=21
 DAYS_AHEAD=1
 MIN_CONFIDENCE=70
 TARGET_ODDS=3.0
@@ -102,6 +103,8 @@ SPORTYBET_COUNTRY=ng
 ```
 
 Tips include **SportyBet.com booking codes** you can paste into the SportyBet betslip (Booking Code → Load).
+
+If today has **0 fixtures** (summer break), the bot loads the **next matches within 21 days**.
 - Move with arrow keys
 - Paste token with **right-click**
 - Save: `Ctrl+O` → Enter
@@ -176,6 +179,20 @@ Full guide: **[TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)**
 ## Step 9 — Run 24/7 (survive closing PuTTY)
 
 ```bash
+# If you see "duplicate session: football", the bot is already running.
+# Attach to it instead of creating a new one:
+tmux attach -t football
+
+# First time only:
+tmux new -s football
+cd ~/apps/ChoiceCoin.github.io/football-prediction-bot
+source .venv/bin/activate
+python main.py --daemon
+```
+
+**If session already exists and you need a clean restart:**
+```bash
+tmux kill-session -t football
 tmux new -s football
 cd ~/apps/ChoiceCoin.github.io/football-prediction-bot
 source .venv/bin/activate
