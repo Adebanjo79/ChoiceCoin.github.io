@@ -87,6 +87,7 @@ def test_command_bot_status_and_unauthorized():
         on_tips=lambda: "cached tips",
         on_safety_refresh=lambda: "fresh safety",
         on_band=lambda key: f"band-{key}",
+        on_fixtures=lambda: "fixtures list",
     )
     bot.handle_update(
         {"message": {"text": "/status", "chat": {"id": 111}}}

@@ -15,11 +15,12 @@ COMMANDS = [
     {"command": "start", "description": "Welcome + how to use"},
     {"command": "help", "description": "List commands"},
     {"command": "status", "description": "Bot health / last scan"},
-    {"command": "tips", "description": "Full acca board: 3 / 5 / 50"},
-    {"command": "3odd", "description": "Safest ≈3.0 — 1 to 3 games"},
-    {"command": "5odd", "description": "≈5.0 accumulator — 4+ games"},
-    {"command": "50odd", "description": "≈50 accumulator — 7+ games"},
-    {"command": "safety", "description": "Refresh all accumulators now"},
+    {"command": "fixtures", "description": "Today's fixtures with dates"},
+    {"command": "tips", "description": "Daily board: fixtures + 3/5/50 odds"},
+    {"command": "3odd", "description": "Daily ≈3.0 odds (with date)"},
+    {"command": "5odd", "description": "Daily ≈5.0 odds (with date)"},
+    {"command": "50odd", "description": "Daily ≈50 odds (with date)"},
+    {"command": "safety", "description": "Refresh today's tips now"},
     {"command": "ping", "description": "Quick alive check"},
 ]
 
@@ -34,6 +35,7 @@ class TelegramCommandBot:
         on_safety_refresh: Callable[[], str] | None = None,
         on_tips: Callable[[], str] | None = None,
         on_band: Callable[[str], str] | None = None,
+        on_fixtures: Callable[[], str] | None = None,
     ) -> None:
         self.telegram = telegram
         self.status = status
@@ -41,6 +43,7 @@ class TelegramCommandBot:
         self.on_safety_refresh = on_safety_refresh
         self.on_tips = on_tips
         self.on_band = on_band
+        self.on_fixtures = on_fixtures
 
     def setup(self) -> None:
         if not self.telegram.bot_ready:
@@ -83,21 +86,26 @@ class TelegramCommandBot:
     def _dispatch(self, cmd: str) -> str:
         if cmd in {"/start", "/help"}:
             return (
-                "⚽ Football Acca Bot\n"
-                "Safest multi-game tickets with confidence.\n\n"
-                "• /3odd — safest ≈3.0 (1, 2 or 3 games)\n"
-                "• /5odd — ≈5.0 accumulator (4+ games)\n"
-                "• /50odd — ≈50 accumulator (7+ games)\n"
+                "⚽ Daily Fixture Odds Bot\n"
+                "Today's matches → ≈3 / ≈5 / ≈50 odds with dates.\n\n"
+                "• /fixtures — today's fixture list + dates\n"
                 "• /tips — full daily board\n"
+                "• /3odd — daily ≈3.0 odds\n"
+                "• /5odd — daily ≈5.0 odds\n"
+                "• /50odd — daily ≈50 odds\n"
                 "• /safety — refresh now\n"
                 "• /status — bot health\n"
                 "• /ping — alive check\n\n"
-                "Not betting advice. One losing leg kills an accumulator."
+                "Not betting advice."
             )
         if cmd == "/ping":
             return f"pong ✅ | uptime {self.status.uptime()} | mode {self.status.mode}"
         if cmd == "/status":
             return self.status.format_status()
+        if cmd in {"/fixtures", "/fixture", "/matches"}:
+            if self.on_fixtures:
+                return self.on_fixtures()
+            return "No fixtures cached. Use /safety"
         if cmd == "/tips":
             if self.on_tips:
                 return self.on_tips()
@@ -117,7 +125,7 @@ class TelegramCommandBot:
         if cmd == "/safety":
             if self.on_safety_refresh:
                 return self.on_safety_refresh()
-            return "Safety refresh not available in this mode."
+            return "Refresh not available in this mode."
         return "Unknown command. Try /help"
 
     def process_updates(self, timeout: int = 5) -> int:

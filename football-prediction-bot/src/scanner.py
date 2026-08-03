@@ -1,24 +1,24 @@
-"""Daily scan orchestrator — multi-game accumulators for ≈3 / ≈5 / ≈50 odds."""
+"""Daily scan orchestrator — today's fixtures with ≈3 / ≈5 / ≈50 odds + dates."""
 
 from __future__ import annotations
 
 import logging
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import schedule
 
 from config import Settings
-from src.accumulator import (
-    AccaSpec,
-    Accumulator,
-    build_accumulators,
-    format_accumulator_report,
-    format_band_accus,
-)
 from src.analysis.engine import analyze_fixture, resolve_form, tips_from_predictions
+from src.daily_board import (
+    DailyBoard,
+    build_daily_board,
+    format_band_singles,
+    format_daily_odds_report,
+    format_fixtures_list,
+)
 from src.data.demo_fixtures import demo_fixtures, demo_team_forms
 from src.data.football_data import FootballDataClient
 from src.data.odds_api import OddsApiClient
@@ -26,6 +26,7 @@ from src.models import Fixture, TeamForm, Tip
 from src.runtime_status import RuntimeStatus
 from src.telegram_alerter import TelegramAlerter
 from src.telegram_bot import TelegramCommandBot
+from src.time_window import in_daily_window, local_day_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +44,11 @@ class PredictionScanner:
             leagues=list(settings.leagues),
         )
         self._cached_tips: list[Tip] = []
-        self._cached_accus: dict[str, list[Accumulator]] = {
-            "3odd": [],
-            "5odd": [],
-            "50odd": [],
-        }
+        self._cached_board: DailyBoard | None = None
+        self._cached_fixtures: list[Fixture] = []
         self._cached_band_reports: dict[str, str] = {}
         self._cached_report = "No tips yet. Use /safety to scan."
+        self._cached_fixtures_report = "No fixtures yet."
         self.fd: FootballDataClient | None = None
         self.odds: OddsApiClient | None = None
         if settings.football_data_api_token and not settings.use_demo():
@@ -67,65 +66,22 @@ class PredictionScanner:
             on_safety_refresh=self.refresh_safety_report,
             on_tips=self.cached_tips_report,
             on_band=self.cached_band_report,
+            on_fixtures=self.cached_fixtures_report,
         )
-
-    def acca_specs(self) -> dict[str, AccaSpec]:
-        s = self.settings
-        return {
-            "3odd": AccaSpec(
-                band_key="3odd",
-                title="🛡️ SAFEST 3-ODD ACCA (1–3 games)",
-                target_odds=s.target_odds,
-                tolerance=s.odds_tolerance,
-                min_confidence=s.safety_min_confidence,
-                min_legs=s.acca3_min_legs,
-                max_legs=s.acca3_max_legs,
-                leg_odds_min=s.acca_leg_odds_min,
-                leg_odds_max=min(s.acca_leg_odds_max, 2.50),
-                prefer_safe_markets=True,
-                max_accus=3,  # offer 1-game, 2-game, 3-game options
-            ),
-            "5odd": AccaSpec(
-                band_key="5odd",
-                title="🎯 5-ODD ACCA (4+ games)",
-                target_odds=s.target_odds_5,
-                tolerance=s.odds_tolerance_5,
-                min_confidence=s.odd5_min_confidence,
-                min_legs=s.acca5_min_legs,
-                max_legs=s.acca5_max_legs,
-                leg_odds_min=s.acca_leg_odds_min,
-                leg_odds_max=s.acca_leg_odds_max,
-                prefer_safe_markets=True,
-                max_accus=2,
-            ),
-            "50odd": AccaSpec(
-                band_key="50odd",
-                title="🚀 50-ODD ACCA (7+ games)",
-                target_odds=s.target_odds_50,
-                tolerance=s.odds_tolerance_50,
-                min_confidence=max(55.0, s.odd50_min_confidence - 5),
-                min_legs=s.acca50_min_legs,
-                max_legs=s.acca50_max_legs,
-                # Longer per-leg prices so 7–12 folds can reach ≈50 combined
-                leg_odds_min=max(1.35, s.acca_leg_odds_min),
-                leg_odds_max=max(s.acca_leg_odds_max, 3.20),
-                prefer_safe_markets=True,
-                max_accus=2,
-            ),
-        }
 
     def load_fixtures(self) -> list[Fixture]:
         days = max(1, int(self.settings.days_ahead))
         daily = bool(self.settings.daily_only)
+        tz_name = self.settings.timezone_name
+        hours = self.settings.daily_include_next_hours
+
         if self.settings.use_demo() or self.fd is None:
             logger.info(
-                "Using DEMO fixtures (%s) — set FOOTBALL_DATA_API_TOKEN for live data",
-                "today only" if daily else f"next {days} day(s)",
+                "Using DEMO fixtures (%s, tz=%s) — set FOOTBALL_DATA_API_TOKEN for live data",
+                "daily" if daily else f"next {days}d",
+                tz_name,
             )
-            from datetime import timezone
-
             now = datetime.now(timezone.utc)
-            today = now.date()
             fixtures = demo_fixtures()
             codes = set(self.settings.leagues)
             out: list[Fixture] = []
@@ -135,13 +91,15 @@ class PredictionScanner:
                 if f.kickoff < now:
                     continue
                 if daily:
-                    if f.kickoff.astimezone(timezone.utc).date() != today:
+                    if not in_daily_window(
+                        f.kickoff,
+                        tz_name=tz_name,
+                        include_next_hours=hours,
+                        now=now,
+                    ):
                         continue
-                else:
-                    from datetime import timedelta
-
-                    if f.kickoff > now + timedelta(days=days):
-                        continue
+                elif f.kickoff > now + timedelta(days=days):
+                    continue
                 out.append(f)
             return out
 
@@ -149,6 +107,8 @@ class PredictionScanner:
             self.settings.leagues,
             days_ahead=days,
             daily_only=daily,
+            timezone_name=tz_name,
+            include_next_hours=hours,
         )
 
     def load_forms(self, fixtures: list[Fixture]) -> tuple[dict[str, TeamForm], dict[str, TeamForm]]:
@@ -159,7 +119,7 @@ class PredictionScanner:
             by_name = demo_team_forms()
             return by_id, by_name
 
-        leagues = {f.league_code for f in fixtures}
+        leagues = {f.league_code for f in fixtures} or set(self.settings.leagues)
         for code in leagues:
             forms = self.fd.team_form_from_matches(code)
             by_id.update(forms)
@@ -175,13 +135,14 @@ class PredictionScanner:
             merged.update(self.odds.h2h_odds_for_league(code))
         return merged
 
-    def analyze_all(self) -> tuple[list[Tip], int]:
+    def analyze_all(self) -> tuple[list[Tip], list[Fixture]]:
         fixtures = self.load_fixtures()
+        self._cached_fixtures = fixtures
         by_id, by_name = self.load_forms(fixtures)
         book_map = self.load_book_odds()
         all_tips: list[Tip] = []
 
-        league_avgs: dict[str, float] = defaultdict(list)
+        league_avgs: dict[str, list[float]] = defaultdict(list)
         for f in fixtures:
             home, away = resolve_form(f, by_id, by_name)
             league_avgs[f.league_code].append(home.avg_gf)
@@ -205,29 +166,22 @@ class PredictionScanner:
             all_tips.extend(tips_from_predictions(fixture, preds))
 
         logger.info(
-            "Analyzed %d fixtures → %d market predictions",
+            "Analyzed %d daily fixtures → %d market predictions",
             len(fixtures),
             len(all_tips),
         )
-        return all_tips, len(fixtures)
-
-    def select_all_accus(self, tips: list[Tip]) -> dict[str, list[Accumulator]]:
-        specs = self.acca_specs()
-        return {key: build_accumulators(tips, spec) for key, spec in specs.items()}
-
-    # Back-compat alias used by older main paths
-    def select_all_bands(self, tips: list[Tip]) -> dict[str, list[Tip]]:
-        accus = self.select_all_accus(tips)
-        # flatten first acca legs per band for any legacy caller
-        return {k: (v[0].legs if v else []) for k, v in accus.items()}
+        return all_tips, fixtures
 
     def cached_tips_report(self) -> str:
         return self._cached_report
 
+    def cached_fixtures_report(self) -> str:
+        return self._cached_fixtures_report
+
     def cached_band_report(self, band_key: str) -> str:
         if band_key in self._cached_band_reports:
             return self._cached_band_reports[band_key]
-        return f"No {band_key} accumulator cached yet. Use /safety to refresh."
+        return f"No {band_key} tips cached yet. Use /safety to refresh."
 
     def refresh_safety_report(self) -> str:
         self.run_daily(push_telegram=True)
@@ -236,27 +190,49 @@ class PredictionScanner:
     def run_daily(self, *, push_telegram: bool = True) -> list[Tip]:
         self.status.mark_scan_start()
         try:
-            all_tips, fixture_count = self.analyze_all()
-            accus = self.select_all_accus(all_tips)
-            specs = self.acca_specs()
-            report = format_accumulator_report(accus, specs)
+            all_tips, fixtures = self.analyze_all()
+            board = build_daily_board(fixtures, all_tips, self.settings)
+            _, _, day_label = local_day_bounds(self.settings.timezone_name)
+            board.day_label = day_label
+            report = format_daily_odds_report(board, self.settings)
+            fixtures_report = format_fixtures_list(fixtures, day_label)
 
-            self._cached_accus = accus
-            self._cached_band_reports = {
-                key: format_band_accus(group, specs[key]) for key, group in accus.items()
-            }
-            self._cached_tips = accus["3odd"][0].legs if accus.get("3odd") else []
+            self._cached_board = board
             self._cached_report = report
+            self._cached_fixtures_report = fixtures_report
+            self._cached_tips = board.tips_3
+            self._cached_band_reports = {
+                "3odd": format_band_singles(
+                    board.tips_3,
+                    "🛡️ DAILY ≈3.0 ODDS",
+                    self.settings.target_odds,
+                    self.settings.safety_min_confidence,
+                ),
+                "5odd": format_band_singles(
+                    board.tips_5,
+                    "🎯 DAILY ≈5.0 ODDS",
+                    self.settings.target_odds_5,
+                    self.settings.odd5_min_confidence,
+                ),
+                "50odd": format_band_singles(
+                    board.tips_50,
+                    "🚀 DAILY ≈50 ODDS",
+                    self.settings.target_odds_50,
+                    self.settings.odd50_min_confidence,
+                ),
+                "fixtures": fixtures_report,
+            }
 
-            total_legs = sum(a.leg_count for group in accus.values() for a in group)
+            total = len(board.tips_3) + len(board.tips_5) + len(board.tips_50)
             summary = (
-                f"accas 3:{len(accus['3odd'])} 5:{len(accus['5odd'])} "
-                f"50:{len(accus['50odd'])} | legs:{total_legs}"
+                f"fixtures:{len(fixtures)} | "
+                f"3odd:{len(board.tips_3)} 5odd:{len(board.tips_5)} "
+                f"50odd:{len(board.tips_50)}"
             )
             self.status.mark_scan(
-                fixtures=fixture_count,
+                fixtures=len(fixtures),
                 predictions=len(all_tips),
-                tips=total_legs,
+                tips=total,
                 summary=summary,
                 ok=True,
             )
@@ -264,8 +240,8 @@ class PredictionScanner:
             if push_telegram and self.telegram.enabled:
                 if self.telegram.send(report):
                     self.status.mark_telegram_push()
-            elif total_legs == 0:
-                logger.info("No accumulators met filters today")
+            elif total == 0:
+                logger.info("No daily tips met filters")
             return self._cached_tips
         except Exception as exc:  # noqa: BLE001
             logger.exception("Daily scan failed: %s", exc)
@@ -298,16 +274,14 @@ class PredictionScanner:
             schedule.every(status_hours).hours.do(self.push_status)
             logger.info("Telegram status heartbeat every %sh", status_hours)
 
-        logger.info("Scheduled daily ACCA board at %02d:00 UTC", hour)
+        logger.info("Scheduled daily fixture odds at %02d:00 UTC", hour)
         if self.telegram.enabled:
             self.telegram.send(
-                "🟢 Football Acca Bot online\n"
-                "Daily tickets:\n"
-                "• Safest ≈3.0 — 1 to 3 games\n"
-                "• ≈5.0 — 4+ games\n"
-                "• ≈50 — 7+ games\n"
+                "🟢 Daily Fixture Odds Bot online\n"
+                f"Timezone: {self.settings.timezone_name}\n"
+                "Today's fixtures → ≈3 / ≈5 / ≈50 odds with dates\n"
                 f"Push time: {hour:02d}:00 UTC\n"
-                "Commands: /tips /3odd /5odd /50odd /status /safety"
+                "Commands: /tips /fixtures /3odd /5odd /50odd /status /safety"
             )
             self.status.mark_status_push()
 
@@ -321,11 +295,23 @@ class PredictionScanner:
             else:
                 time.sleep(30)
 
-    def export_json(self) -> dict[str, list[dict[str, Any]]]:
-        all_tips, _ = self.analyze_all()
-        accus = self.select_all_accus(all_tips)
+    def export_json(self) -> dict[str, Any]:
+        all_tips, fixtures = self.analyze_all()
+        board = build_daily_board(fixtures, all_tips, self.settings)
         now = datetime.now(timezone.utc).isoformat()
         return {
-            key: [{**a.to_dict(), "generated_at": now} for a in group]
-            for key, group in accus.items()
+            "generated_at": now,
+            "day": board.day_label,
+            "fixtures": [
+                {
+                    "league": f.league_code,
+                    "match": f.label,
+                    "date": f.date_str,
+                    "kickoff": f.kickoff_str,
+                }
+                for f in board.fixtures
+            ],
+            "3odd": [t.to_dict() for t in board.tips_3],
+            "5odd": [t.to_dict() for t in board.tips_5],
+            "50odd": [t.to_dict() for t in board.tips_50],
         }

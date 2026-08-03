@@ -46,17 +46,30 @@ class FootballDataClient:
         resp.raise_for_status()
         return resp.json()
 
-    def upcoming_fixtures(self, league_codes: list[str], days_ahead: int = 1, *, daily_only: bool = True) -> list[Fixture]:
-        """Load upcoming fixtures. Default: today's matches only (UTC calendar day)."""
+    def upcoming_fixtures(
+        self,
+        league_codes: list[str],
+        days_ahead: int = 1,
+        *,
+        daily_only: bool = True,
+        timezone_name: str = "Africa/Lagos",
+        include_next_hours: int = 24,
+    ) -> list[Fixture]:
+        """Load upcoming fixtures. Default: today's matches (local TZ) + next hours."""
+        from src.time_window import in_daily_window, local_day_bounds
+
         days_ahead = max(1, int(days_ahead))
         now = datetime.now(timezone.utc)
-        today = now.date()
+
         if daily_only:
-            date_from = today.isoformat()
-            date_to = today.isoformat()
-            window_label = "today"
+            start_utc, end_utc, day_label = local_day_bounds(timezone_name)
+            # API date range must cover local day in UTC (+ rolling hours)
+            roll_end = now + timedelta(hours=max(0, include_next_hours))
+            date_from = min(start_utc, now).date().isoformat()
+            date_to = max(end_utc, roll_end).date().isoformat()
+            window_label = f"daily/{day_label}"
         else:
-            date_from = today.isoformat()
+            date_from = now.date().isoformat()
             date_to = (now + timedelta(days=days_ahead)).date().isoformat()
             window_label = f"next {days_ahead}d"
 
@@ -73,10 +86,14 @@ class FootballDataClient:
             loaded = 0
             for match in data.get("matches", []):
                 fixture = self._parse_fixture(match, code)
-                # Skip already-started / past kickoffs
                 if fixture.kickoff < now:
                     continue
-                if daily_only and fixture.kickoff.astimezone(timezone.utc).date() != today:
+                if daily_only and not in_daily_window(
+                    fixture.kickoff,
+                    tz_name=timezone_name,
+                    include_next_hours=include_next_hours,
+                    now=now,
+                ):
                     continue
                 fixtures.append(fixture)
                 loaded += 1

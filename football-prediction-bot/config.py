@@ -107,10 +107,18 @@ class Settings:
     )
     run_hour_utc: int = field(default_factory=lambda: _env_int("RUN_HOUR_UTC", 8))
     scan_interval_hours: int = field(default_factory=lambda: _env_int("SCAN_INTERVAL_HOURS", 24))
-    # Daily matches only (today UTC). Set false + DAYS_AHEAD>1 for multi-day.
+    # Daily matches only (default true). Uses TIMEZONE calendar day.
     daily_only: bool = field(default_factory=lambda: _env_bool("DAILY_ONLY", True))
+    # Africa/Lagos works well for WAT users; use UTC if preferred
+    timezone_name: str = field(
+        default_factory=lambda: os.getenv("TIMEZONE", "Africa/Lagos").strip() or "Africa/Lagos"
+    )
     # Used only when DAILY_ONLY=false
     days_ahead: int = field(default_factory=lambda: _env_int("DAYS_AHEAD", 1))
+    # Also include fixtures in the next N hours (helps late evening / early slate)
+    daily_include_next_hours: int = field(
+        default_factory=lambda: _env_int("DAILY_INCLUDE_NEXT_HOURS", 24)
+    )
     status_interval_hours: int = field(default_factory=lambda: _env_int("STATUS_INTERVAL_HOURS", 6))
     telegram_poll_seconds: int = field(default_factory=lambda: _env_int("TELEGRAM_POLL_SECONDS", 5))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
