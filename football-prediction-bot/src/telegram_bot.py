@@ -1,4 +1,4 @@
-"""Interactive Telegram command bot + allowed-chat gate."""
+"""Interactive Telegram command bot — full daily odds + SportyBet control."""
 
 from __future__ import annotations
 
@@ -12,17 +12,45 @@ from src.telegram_alerter import TelegramAlerter
 logger = logging.getLogger(__name__)
 
 COMMANDS = [
-    {"command": "start", "description": "Welcome + how to use"},
-    {"command": "help", "description": "List commands"},
+    {"command": "start", "description": "Welcome + menu"},
+    {"command": "help", "description": "List all commands"},
+    {"command": "menu", "description": "Quick command menu"},
     {"command": "status", "description": "Bot health / last scan"},
-    {"command": "fixtures", "description": "Today's fixtures with dates"},
-    {"command": "tips", "description": "Daily board: fixtures + 3/5/50 odds"},
-    {"command": "3odd", "description": "Daily ≈3.0 odds (with date)"},
-    {"command": "5odd", "description": "Daily ≈5.0 odds (with date)"},
-    {"command": "50odd", "description": "Daily ≈50 odds (with date)"},
-    {"command": "safety", "description": "Refresh today's tips now"},
+    {"command": "fixtures", "description": "Today's fixtures + dates"},
+    {"command": "tips", "description": "Full board: fixtures + 3/5/50"},
+    {"command": "3odd", "description": "Daily ≈3.0 odds + SportyBet code"},
+    {"command": "5odd", "description": "Daily ≈5.0 odds + SportyBet code"},
+    {"command": "50odd", "description": "Daily ≈50 odds + SportyBet code"},
+    {"command": "codes", "description": "SportyBet booking codes only"},
+    {"command": "sportybet", "description": "Same as /codes"},
+    {"command": "safety", "description": "Refresh tips + codes now"},
+    {"command": "refresh", "description": "Same as /safety"},
     {"command": "ping", "description": "Quick alive check"},
 ]
+
+HELP_TEXT = (
+    "⚽ Daily Fixture Odds Bot\n"
+    "Today's matches → ≈3 / ≈5 / ≈50 odds + SportyBet codes\n"
+    "─" * 28 + "\n"
+    "📅 FIXTURES\n"
+    "• /fixtures — today's matches + dates\n\n"
+    "🎯 TIPS\n"
+    "• /tips — full daily board\n"
+    "• /3odd — ≈3.0 odds singles\n"
+    "• /5odd — ≈5.0 odds singles\n"
+    "• /50odd — ≈50 odds singles\n\n"
+    "🎫 SPORTYBET\n"
+    "• /codes — booking codes (easy copy)\n"
+    "• /sportybet — same as /codes\n"
+    "  Load: SportyBet → Betslip → Booking Code → Load\n\n"
+    "🔄 REFRESH\n"
+    "• /safety or /refresh — scan now\n\n"
+    "📡 SYSTEM\n"
+    "• /status — health / last scan\n"
+    "• /ping — alive check\n"
+    "• /help — this menu\n\n"
+    "Not betting advice. Stake responsibly."
+)
 
 
 class TelegramCommandBot:
@@ -36,6 +64,7 @@ class TelegramCommandBot:
         on_tips: Callable[[], str] | None = None,
         on_band: Callable[[str], str] | None = None,
         on_fixtures: Callable[[], str] | None = None,
+        on_codes: Callable[[], str] | None = None,
     ) -> None:
         self.telegram = telegram
         self.status = status
@@ -44,6 +73,7 @@ class TelegramCommandBot:
         self.on_tips = on_tips
         self.on_band = on_band
         self.on_fixtures = on_fixtures
+        self.on_codes = on_codes
 
     def setup(self) -> None:
         if not self.telegram.bot_ready:
@@ -80,53 +110,73 @@ class TelegramCommandBot:
             self.telegram.chat_id = chat_id
 
         cmd = parse_command(text)
+        # Long refresh: acknowledge first so the chat doesn't feel stuck
+        if cmd in {"/safety", "/refresh", "/scan"}:
+            self.telegram.send(
+                "⏳ Refreshing today's fixtures, tips & SportyBet codes…\n"
+                "This can take ~30–90 seconds.",
+                chat_id=chat_id,
+            )
+
         reply = self._dispatch(cmd)
         self.telegram.send(reply, chat_id=chat_id)
 
     def _dispatch(self, cmd: str) -> str:
-        if cmd in {"/start", "/help"}:
-            return (
-                "⚽ Daily Fixture Odds Bot\n"
-                "Today's matches → ≈3 / ≈5 / ≈50 odds with dates.\n\n"
-                "• /fixtures — today's fixture list + dates\n"
-                "• /tips — full daily board\n"
-                "• /3odd — daily ≈3.0 odds\n"
-                "• /5odd — daily ≈5.0 odds\n"
-                "• /50odd — daily ≈50 odds\n"
-                "• /safety — refresh now\n"
-                "• /status — bot health\n"
-                "• /ping — alive check\n\n"
-                "Not betting advice."
-            )
+        if cmd in {"/start", "/help", "/menu", "/commands"}:
+            return HELP_TEXT
         if cmd == "/ping":
             return f"pong ✅ | uptime {self.status.uptime()} | mode {self.status.mode}"
         if cmd == "/status":
             return self.status.format_status()
         if cmd in {"/fixtures", "/fixture", "/matches"}:
             if self.on_fixtures:
-                return self.on_fixtures()
-            return "No fixtures cached. Use /safety"
+                return self._or_refresh_hint(self.on_fixtures())
+            return "No fixtures cached. Send /safety to scan."
         if cmd == "/tips":
             if self.on_tips:
-                return self.on_tips()
-            return self.status.last_tips_summary or "No tips cached yet. Use /safety"
-        if cmd in {"/3odd", "/3", "/safety3"}:
+                return self._or_refresh_hint(self.on_tips())
+            return "No tips cached yet. Send /safety to scan."
+        if cmd in {"/3odd", "/3", "/safety3", "/odd3"}:
             if self.on_band:
-                return self.on_band("3odd")
-            return "3-odd tips unavailable."
-        if cmd in {"/5odd", "/5"}:
+                return self._or_refresh_hint(self.on_band("3odd"))
+            return "3-odd tips unavailable. Send /safety"
+        if cmd in {"/5odd", "/5", "/odd5"}:
             if self.on_band:
-                return self.on_band("5odd")
-            return "5-odd tips unavailable."
-        if cmd in {"/50odd", "/50"}:
+                return self._or_refresh_hint(self.on_band("5odd"))
+            return "5-odd tips unavailable. Send /safety"
+        if cmd in {"/50odd", "/50", "/odd50"}:
             if self.on_band:
-                return self.on_band("50odd")
-            return "50-odd tips unavailable."
-        if cmd == "/safety":
+                return self._or_refresh_hint(self.on_band("50odd"))
+            return "50-odd tips unavailable. Send /safety"
+        if cmd in {"/codes", "/code", "/sportybet", "/booking", "/sb"}:
+            if self.on_codes:
+                return self._or_refresh_hint(self.on_codes())
+            return "No SportyBet codes cached. Send /safety to refresh."
+        if cmd in {"/safety", "/refresh", "/scan"}:
             if self.on_safety_refresh:
                 return self.on_safety_refresh()
-            return "Refresh not available in this mode."
-        return "Unknown command. Try /help"
+            return "Refresh not available in this mode. Run: python main.py --daemon"
+        return (
+            "Unknown command. Send /help for the full menu.\n"
+            "Quick: /tips /fixtures /3odd /5odd /50odd /codes /safety /status"
+        )
+
+    @staticmethod
+    def _or_refresh_hint(text: str) -> str:
+        lowered = (text or "").lower()
+        empty_markers = (
+            "no tips yet",
+            "no fixtures yet",
+            "no qualifying",
+            "no sportybet codes yet",
+            "not cached",
+        )
+        if any(m in lowered for m in empty_markers):
+            return (
+                f"{text}\n\n"
+                "Tip: send /safety to refresh today's scan + SportyBet codes."
+            )
+        return text
 
     def process_updates(self, timeout: int = 5) -> int:
         updates = self.telegram.poll_updates(timeout=timeout)

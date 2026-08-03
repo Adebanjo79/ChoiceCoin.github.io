@@ -18,6 +18,7 @@ from src.daily_board import (
     format_band_singles,
     format_daily_odds_report,
     format_fixtures_list,
+    format_sportybet_codes_report,
 )
 from src.data.demo_fixtures import demo_fixtures, demo_team_forms
 from src.data.football_data import FootballDataClient
@@ -53,8 +54,9 @@ class PredictionScanner:
         self._cached_board: DailyBoard | None = None
         self._cached_fixtures: list[Fixture] = []
         self._cached_band_reports: dict[str, str] = {}
-        self._cached_report = "No tips yet. Use /safety to scan."
-        self._cached_fixtures_report = "No fixtures yet."
+        self._cached_report = "No tips yet. Send /safety to scan."
+        self._cached_fixtures_report = "No fixtures yet. Send /safety to scan."
+        self._cached_codes_report = "No SportyBet codes yet. Send /safety to scan."
         self.fd: FootballDataClient | None = None
         self.odds: OddsApiClient | None = None
         if settings.football_data_api_token and not settings.use_demo():
@@ -73,6 +75,7 @@ class PredictionScanner:
             on_tips=self.cached_tips_report,
             on_band=self.cached_band_report,
             on_fixtures=self.cached_fixtures_report,
+            on_codes=self.cached_codes_report,
         )
 
     def load_fixtures(self) -> list[Fixture]:
@@ -184,10 +187,13 @@ class PredictionScanner:
     def cached_fixtures_report(self) -> str:
         return self._cached_fixtures_report
 
+    def cached_codes_report(self) -> str:
+        return self._cached_codes_report
+
     def cached_band_report(self, band_key: str) -> str:
         if band_key in self._cached_band_reports:
             return self._cached_band_reports[band_key]
-        return f"No {band_key} tips cached yet. Use /safety to refresh."
+        return f"No {band_key} tips cached yet. Send /safety to refresh."
 
     def refresh_safety_report(self) -> str:
         self.run_daily(push_telegram=True)
@@ -231,10 +237,12 @@ class PredictionScanner:
             self._attach_sportybet(board)
             report = format_daily_odds_report(board, self.settings)
             fixtures_report = format_fixtures_list(fixtures, day_label)
+            codes_report = format_sportybet_codes_report(board)
 
             self._cached_board = board
             self._cached_report = report
             self._cached_fixtures_report = fixtures_report
+            self._cached_codes_report = codes_report
             self._cached_tips = board.tips_3
             self._cached_band_reports = {
                 "3odd": format_band_singles(
@@ -262,6 +270,7 @@ class PredictionScanner:
                     band_codes=board.band_codes,
                 ),
                 "fixtures": fixtures_report,
+                "codes": codes_report,
             }
 
             total = len(board.tips_3) + len(board.tips_5) + len(board.tips_50)
@@ -320,9 +329,9 @@ class PredictionScanner:
             self.telegram.send(
                 "🟢 Daily Fixture Odds Bot online\n"
                 f"Timezone: {self.settings.timezone_name}\n"
-                "Today's fixtures → ≈3 / ≈5 / ≈50 odds with dates\n"
-                f"Push time: {hour:02d}:00 UTC\n"
-                "Commands: /tips /fixtures /3odd /5odd /50odd /status /safety"
+                "Today's fixtures → ≈3 / ≈5 / ≈50 + SportyBet codes\n"
+                f"Push time: {hour:02d}:00 UTC\n\n"
+                "Try: /menu /tips /fixtures /3odd /5odd /50odd /codes /safety /status"
             )
             self.status.mark_status_push()
 

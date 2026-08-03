@@ -20,7 +20,8 @@ python main.py --daemon
 - Uses **today's fixtures** (`DAILY_ONLY=true`, timezone `Africa/Lagos` + next 24h)
 - Daily singles for **≈3 / ≈5 / ≈50 odds**, each with full **date + kickoff**
 - **SportyBet.com booking codes** on each tip + one multi code per odds band (load in betslip)
-- Commands: `/tips` `/fixtures` `/3odd` `/5odd` `/50odd` `/safety` `/status` `/ping`
+- Commands: `/tips` `/fixtures` `/3odd` `/5odd` `/50odd` `/codes` `/safety` `/status` `/ping`
+- Full Telegram guide: **[TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)**
 
 ---
 

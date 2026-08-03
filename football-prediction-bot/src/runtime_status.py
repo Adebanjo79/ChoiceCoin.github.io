@@ -101,7 +101,9 @@ class RuntimeStatus:
         ]
         if self.last_error:
             lines.append(f"Last error: {self.last_error[:200]}")
-        lines.append("Commands: /status /tips /safety /help")
+        lines.append(
+            "Commands: /menu /tips /fixtures /3odd /5odd /50odd /codes /safety /status"
+        )
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:

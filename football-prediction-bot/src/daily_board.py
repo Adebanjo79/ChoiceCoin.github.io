@@ -221,3 +221,54 @@ def format_fixtures_list(fixtures: list[Fixture], day_label: str) -> str:
         lines.append(f"{i}. [{f.league_code}] {f.label}")
         lines.append(f"   Date: {f.kickoff_str}")
     return "\n".join(lines)
+
+
+def format_sportybet_codes_report(board: DailyBoard) -> str:
+    """Compact SportyBet booking codes for easy copy from Telegram."""
+    lines = [
+        "🎫 SPORTYBET BOOKING CODES",
+        f"Day: {board.day_label}",
+        "Paste into SportyBet → Betslip → Booking Code → Load",
+        "─" * 36,
+    ]
+
+    band_labels = [
+        ("3odd", "≈3.0 ODDS", board.tips_3),
+        ("5odd", "≈5.0 ODDS", board.tips_5),
+        ("50odd", "≈50 ODDS", board.tips_50),
+    ]
+    any_code = False
+    for key, title, tips in band_labels:
+        booking = board.band_codes.get(key)
+        lines.append("")
+        lines.append(f"📌 {title}")
+        if booking:
+            any_code = True
+            lines.append(f"  MULTI CODE: {booking.share_code}  ({booking.matched} legs)")
+            lines.append(f"  {booking.share_url}")
+        else:
+            lines.append("  MULTI CODE: (none yet)")
+        if not tips:
+            lines.append("  (no tips in this band)")
+            continue
+        for i, tip in enumerate(tips, start=1):
+            p = tip.prediction
+            f = tip.fixture
+            code = tip.sportybet_code or "—"
+            if tip.sportybet_code:
+                any_code = True
+            lines.append(
+                f"  {i}. [{f.league_code}] {f.home_team} vs {f.away_team}"
+            )
+            lines.append(f"     {p.market_label} @ {p.display_odds:.2f}")
+            lines.append(f"     Code: {code}")
+            if tip.sportybet_url:
+                lines.append(f"     {tip.sportybet_url}")
+
+    lines.append("")
+    if not any_code:
+        lines.append("No SportyBet codes yet. Send /safety to refresh.")
+    else:
+        lines.append("Codes expire when the earliest match starts.")
+    lines.append("Not betting advice.")
+    return "\n".join(lines)

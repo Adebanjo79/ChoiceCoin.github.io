@@ -63,8 +63,8 @@ def main() -> int:
         ok = scanner.telegram.send(
             "✅ Daily Fixture Odds Bot Telegram OK\n"
             f"Timezone: {cfg.timezone_name}\n"
-            "Today's fixtures → ≈3 / ≈5 / ≈50 odds with dates\n"
-            "Commands: /tips /fixtures /3odd /5odd /50odd /status /safety"
+            "Today's fixtures → ≈3 / ≈5 / ≈50 + SportyBet codes\n"
+            "Commands: /menu /tips /fixtures /3odd /5odd /50odd /codes /safety /status"
         )
         print("Telegram OK" if ok else "Telegram FAILED — set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID")
         return 0 if ok else 1
