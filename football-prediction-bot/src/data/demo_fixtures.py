@@ -7,44 +7,62 @@ from datetime import datetime, timedelta, timezone
 from src.models import Fixture, TeamForm
 
 
-def _kickoff(hours_from_now: int) -> datetime:
-    return datetime.now(timezone.utc) + timedelta(hours=hours_from_now)
+def _today_kickoffs(count: int) -> list[datetime]:
+    """Spread `count` kickoffs across the rest of today (UTC)."""
+    now = datetime.now(timezone.utc)
+    today_end = now.replace(hour=23, minute=50, second=0, microsecond=0)
+    if today_end <= now:
+        # Very late UTC — still keep demos "today" a few minutes ahead
+        return [now + timedelta(minutes=5 + i * 3) for i in range(count)]
+
+    span_seconds = (today_end - now).total_seconds()
+    step = max(900, span_seconds / max(count, 1))  # at least 15 minutes apart
+    kicks: list[datetime] = []
+    for i in range(count):
+        kick = now + timedelta(seconds=step * (i + 1) * 0.85)
+        if kick > today_end:
+            kick = today_end - timedelta(minutes=2 * (count - i))
+        if kick <= now:
+            kick = now + timedelta(minutes=5 + i)
+        kicks.append(kick)
+    return kicks
 
 
 def demo_fixtures() -> list[Fixture]:
-    """Realistic upcoming slate across major leagues for local demos."""
+    """Demo slate scheduled for today only (UTC), across major leagues."""
     samples = [
-        ("PL", "Premier League", "Arsenal", "Chelsea", 8),
-        ("PL", "Premier League", "Liverpool", "Newcastle", 12),
-        ("PL", "Premier League", "Brighton", "Aston Villa", 30),
-        ("PD", "La Liga", "Real Madrid", "Sevilla", 10),
-        ("PD", "La Liga", "Girona", "Athletic Club", 26),
-        ("PD", "La Liga", "Valencia", "Villarreal", 34),
-        ("BL1", "Bundesliga", "Bayern Munich", "Dortmund", 14),
-        ("BL1", "Bundesliga", "Freiburg", "Wolfsburg", 28),
-        ("BL1", "Bundesliga", "Stuttgart", "Hoffenheim", 36),
-        ("FL1", "Ligue 1", "PSG", "Marseille", 16),
-        ("FL1", "Ligue 1", "Lyon", "Nice", 32),
-        ("FL1", "Ligue 1", "Lille", "Monaco", 40),
-        ("SA", "Serie A", "Inter", "Juventus", 18),
-        ("SA", "Serie A", "Atalanta", "Napoli", 38),
-        ("SA", "Serie A", "Roma", "Lazio", 44),
-        ("DED", "Eredivisie", "Ajax", "PSV", 20),
-        ("DED", "Eredivisie", "Feyenoord", "AZ Alkmaar", 42),
-        ("PPL", "Primeira Liga", "Benfica", "Porto", 22),
-        ("PPL", "Primeira Liga", "Sporting CP", "Braga", 46),
-        ("ELC", "Championship", "Leeds", "Leicester", 24),
-        ("CL", "Champions League", "Barcelona", "Bayern Munich", 50),
-        ("CL", "Champions League", "Man City", "Real Madrid", 52),
+        ("PL", "Premier League", "Arsenal", "Chelsea"),
+        ("PL", "Premier League", "Liverpool", "Newcastle"),
+        ("PL", "Premier League", "Brighton", "Aston Villa"),
+        ("PD", "La Liga", "Real Madrid", "Sevilla"),
+        ("PD", "La Liga", "Girona", "Athletic Club"),
+        ("PD", "La Liga", "Valencia", "Villarreal"),
+        ("BL1", "Bundesliga", "Bayern Munich", "Dortmund"),
+        ("BL1", "Bundesliga", "Freiburg", "Wolfsburg"),
+        ("BL1", "Bundesliga", "Stuttgart", "Hoffenheim"),
+        ("FL1", "Ligue 1", "PSG", "Marseille"),
+        ("FL1", "Ligue 1", "Lyon", "Nice"),
+        ("FL1", "Ligue 1", "Lille", "Monaco"),
+        ("SA", "Serie A", "Inter", "Juventus"),
+        ("SA", "Serie A", "Atalanta", "Napoli"),
+        ("SA", "Serie A", "Roma", "Lazio"),
+        ("DED", "Eredivisie", "Ajax", "PSV"),
+        ("DED", "Eredivisie", "Feyenoord", "AZ Alkmaar"),
+        ("PPL", "Primeira Liga", "Benfica", "Porto"),
+        ("PPL", "Primeira Liga", "Sporting CP", "Braga"),
+        ("ELC", "Championship", "Leeds", "Leicester"),
+        ("CL", "Champions League", "Barcelona", "Bayern Munich"),
+        ("CL", "Champions League", "Man City", "Real Madrid"),
     ]
+    kicks = _today_kickoffs(len(samples))
     fixtures: list[Fixture] = []
-    for i, (code, name, home, away, hours) in enumerate(samples, start=1):
+    for i, ((code, name, home, away), kick) in enumerate(zip(samples, kicks), start=1):
         fixtures.append(
             Fixture(
                 id=f"demo-{i}",
                 league_code=code,
                 league_name=name,
-                kickoff=_kickoff(hours),
+                kickoff=kick,
                 home_team=home,
                 away_team=away,
                 home_team_id=f"h-{i}",

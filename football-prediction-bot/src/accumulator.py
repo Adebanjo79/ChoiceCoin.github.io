@@ -338,7 +338,7 @@ def format_accumulator_report(
     lines = [
         "⚽ DAILY ACCA BOARD",
         "Safest multi-game tickets → ≈3 / ≈5 / ≈50 combined odds",
-        "Fixtures window: next 3 days (see each leg date)",
+        "Fixtures window: TODAY's matches only (UTC)",
         "─" * 36,
     ]
     order = ["3odd", "5odd", "50odd"]

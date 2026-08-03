@@ -46,14 +46,21 @@ class FootballDataClient:
         resp.raise_for_status()
         return resp.json()
 
-    def upcoming_fixtures(self, league_codes: list[str], days_ahead: int = 3) -> list[Fixture]:
-        """Load scheduled matches from today through the next `days_ahead` days."""
+    def upcoming_fixtures(self, league_codes: list[str], days_ahead: int = 1, *, daily_only: bool = True) -> list[Fixture]:
+        """Load upcoming fixtures. Default: today's matches only (UTC calendar day)."""
         days_ahead = max(1, int(days_ahead))
         now = datetime.now(timezone.utc)
-        date_from = now.date().isoformat()
-        date_to = (now + timedelta(days=days_ahead)).date().isoformat()
+        today = now.date()
+        if daily_only:
+            date_from = today.isoformat()
+            date_to = today.isoformat()
+            window_label = "today"
+        else:
+            date_from = today.isoformat()
+            date_to = (now + timedelta(days=days_ahead)).date().isoformat()
+            window_label = f"next {days_ahead}d"
+
         fixtures: list[Fixture] = []
-        cutoff = now + timedelta(days=days_ahead)
         for code in league_codes:
             try:
                 data = self._get(
@@ -66,10 +73,14 @@ class FootballDataClient:
             loaded = 0
             for match in data.get("matches", []):
                 fixture = self._parse_fixture(match, code)
-                if fixture.kickoff <= cutoff:
-                    fixtures.append(fixture)
-                    loaded += 1
-            logger.info("Loaded %s fixtures for %s (next %sd)", loaded, code, days_ahead)
+                # Skip already-started / past kickoffs
+                if fixture.kickoff < now:
+                    continue
+                if daily_only and fixture.kickoff.astimezone(timezone.utc).date() != today:
+                    continue
+                fixtures.append(fixture)
+                loaded += 1
+            logger.info("Loaded %s fixtures for %s (%s)", loaded, code, window_label)
         fixtures.sort(key=lambda f: f.kickoff)
         return fixtures
 
