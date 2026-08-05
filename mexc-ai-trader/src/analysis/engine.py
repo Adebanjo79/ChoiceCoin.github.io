@@ -70,11 +70,11 @@ def _verdict(direction: Direction, confidence: float, min_confidence: float = 80
 
 def _holding_time(tf_primary: str = "Min15") -> str:
     return {
-        "Min15": "30m – 6h (scalp/intraday)",
-        "Min60": "2h – 24h (intraday/swing)",
-        "Hour4": "12h – 5d (swing)",
-        "Day1": "3d – 3w (position)",
-    }.get(tf_primary, "2h – 24h")
+        "Min15": "2h – 12h",
+        "Min60": "4h – 24h",
+        "Hour4": "12h – 5d",
+        "Day1": "3d – 3w",
+    }.get(tf_primary, "2h – 12h")
 
 
 def analyze_symbol(
@@ -110,11 +110,18 @@ def analyze_symbol(
     missing = [name for name in KEY_FACTORS if name not in aligned_keys]
     why: list[str] = []
     for f in factors:
-        if f.direction == direction and f.aligned:
-            why.extend(f.details[:2])
+        # Pull concrete checklist lines for the FutureTradeBot-style "Why valid"
+        if f.direction == direction or f.aligned:
+            why.extend(f.details[:3])
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    why = [w for w in why if not (w in seen or seen.add(w))][:10]
 
     htf = higher_tf_summary(frames)
     factor_scores = {f.name: round(f.score, 2) for f in factors}
+    factor_aligned = {f.name: bool(f.aligned) for f in factors}
+    factor_weights = {f.name: float(f.weight) for f in factors}
+    price = float(primary["close"].iloc[-1]) if primary is not None and len(primary) else None
 
     # Hard rejects
     reject_reasons: list[str] = []
@@ -183,18 +190,22 @@ def analyze_symbol(
             invalidation=["N/A — no active trade"],
             major_risks=reject_reasons,
             factor_scores=factor_scores,
+            factor_aligned=factor_aligned,
+            factor_weights=factor_weights,
+            price=price,
             raw={"factors": {f.name: f.details for f in factors}, "missing": missing},
         )
 
     invalidation = [
-        f"Close beyond stop-loss at {levels.stop_loss}",
-        "HTF EMA structure flips against trade",
-        "Volume dries up and price re-enters prior range",
+        f"Close above structure SL {levels.stop_loss}." if direction == Direction.SHORT
+        else f"Close below structure SL {levels.stop_loss}.",
+        "HTF (4H/D) flips against the trade.",
+        "Volume dries up and price re-enters prior range.",
     ]
     risks = [
-        "Funding squeeze / liquidation cascade",
-        "Unexpected macro headline",
-        "Exchange outage or thin book slippage",
+        "Crypto volatility / wick stop-outs.",
+        "Funding / OI can flip quickly.",
+        "Macro/news not fully monitored without a calendar API.",
     ]
     verdict = _verdict(direction, confidence, min_confidence=settings.min_confidence)
 
@@ -211,58 +222,88 @@ def analyze_symbol(
         invalidation=invalidation,
         major_risks=risks,
         factor_scores=factor_scores,
+        factor_aligned=factor_aligned,
+        factor_weights=factor_weights,
+        price=price,
         raw={"factors": {f.name: f.details for f in factors}},
     )
 
 
+_FACTOR_LABELS = {
+    "Trend": "trend",
+    "Momentum": "momentum",
+    "Volume": "volume",
+    "Price Action": "priceAction",
+    "Smart Money Concepts": "smc",
+    "Futures Metrics": "futures",
+    "Fundamental Analysis": "fundamental",
+}
+
+
 def format_report(report: SignalReport) -> str:
-    lines = [
-        f"📊 *MEXC Futures Signal — {report.symbol}*",
-        f"Verdict: *{report.verdict.value}*",
-        f"Direction: *{report.direction.value}*",
-        f"Confidence: *{report.confidence:.1f}%*",
-        "",
-        f"HTF trend: {report.higher_tf_trend}",
-        "",
-    ]
+    """FutureTradeBot-style signal card (plain text for reliable Telegram delivery)."""
     if report.message == NO_TRADE_MSG or not report.is_actionable():
-        lines.append(NO_TRADE_MSG)
-        lines.append("")
-        lines.append("Reasons:")
-        for r in report.why_valid[:8]:
-            lines.append(f"• {r}")
-        lines.append("")
-        lines.append("Factor scores:")
-        for k, v in report.factor_scores.items():
-            lines.append(f"• {k}: {v}")
+        lines = [
+            f"{report.symbol}",
+            f"Verdict: {report.verdict.value}",
+            f"Confidence: {report.confidence:.0f}%",
+            f"HTF: {report.higher_tf_trend}",
+            "",
+            NO_TRADE_MSG,
+            "",
+            "Reasons:",
+            *[f"• {r}" for r in report.why_valid[:8]],
+            "",
+            "Factor scores:",
+        ]
+        for name, score in report.factor_scores.items():
+            label = _FACTOR_LABELS.get(name, name)
+            w = int(round(report.factor_weights.get(name, 0) * 100))
+            mark = "✓" if report.factor_aligned.get(name) else ""
+            lines.append(f"• {label}: {score:.0f}% (w{w}%) {mark}".rstrip())
         return "\n".join(lines)
 
     lv = report.levels
     assert lv is not None
+    side = report.side_label()
+    price = report.price if report.price is not None else lv.entry
+
+    lines = [
+        side,
+        report.symbol,
+        f"MEXC · TF 15m · Confidence {report.confidence:.0f}%",
+        f"HTF: {report.higher_tf_trend}",
+        f"Price: {price}",
+        "",
+        "Why valid",
+        *[f"• {w}" for w in report.why_valid[:8]],
+        "",
+        "Factor scores",
+    ]
+    for name, score in report.factor_scores.items():
+        label = _FACTOR_LABELS.get(name, name)
+        w = int(round(report.factor_weights.get(name, 0) * 100))
+        mark = "✓" if report.factor_aligned.get(name) else ""
+        lines.append(f"• {label}: {score:.0f}% (w{w}%) {mark}".rstrip())
+
     lines.extend(
         [
-            "Why valid:",
-            *[f"• {w}" for w in report.why_valid[:8]],
             "",
-            f"Entry: `{lv.entry}`",
-            f"Stop Loss: `{lv.stop_loss}`",
-            f"TP1: `{lv.take_profit_1}`",
-            f"TP2: `{lv.take_profit_2}`",
-            f"TP3: `{lv.take_profit_3}`",
-            f"Risk:Reward: *1:{lv.risk_reward}*",
-            f"Position size (1% risk): `{lv.position_size}` (risk ${lv.risk_amount})",
-            f"Est. holding time: {report.estimated_holding_time}",
+            f"Entry: {lv.entry}",
+            f"SL: {lv.stop_loss}",
+            f"TP1: {lv.take_profit_1} (R:R {lv.rr_tp1:.2f})",
+            f"TP2: {lv.take_profit_2} (R:R {lv.rr_tp2:.2f})",
+            f"TP3: {lv.take_profit_3} (R:R {lv.rr_tp3:.2f})",
+            f"Size (1% risk): {lv.position_size}  (risk ${lv.risk_amount})",
+            f"Est. hold: {report.estimated_holding_time}",
             "",
-            "Invalidation:",
+            "Invalidation",
             *[f"• {x}" for x in report.invalidation],
             "",
-            "Major risks:",
+            "Major risks",
             *[f"• {x}" for x in report.major_risks],
             "",
-            "Factor scores:",
-            *[f"• {k}: {v}" for k, v in report.factor_scores.items()],
-            "",
-            f"Final verdict: *{report.verdict.value}*",
+            f"Verdict: {report.verdict.value}",
         ]
     )
     return "\n".join(lines)

@@ -14,7 +14,10 @@ def build_trade_levels(
     account_balance: float,
     risk_pct: float = 0.01,
     min_rr: float = 2.5,
-    preferred_rr: float = 3.0,
+    preferred_rr: float = 2.5,
+    rr_tp1: float = 2.0,
+    rr_tp2: float = 2.5,
+    rr_tp3: float = 3.5,
 ) -> TradeLevels | None:
     if df is None or len(df) < 30 or direction not in (Direction.LONG, Direction.SHORT):
         return None
@@ -30,9 +33,9 @@ def build_trade_levels(
         risk = entry - stop
         if risk <= 0:
             return None
-        tp1 = entry + risk * 1.5
-        tp2 = entry + risk * preferred_rr
-        tp3 = entry + risk * max(preferred_rr, 4.0)
+        tp1 = entry + risk * rr_tp1
+        tp2 = entry + risk * rr_tp2
+        tp3 = entry + risk * rr_tp3
         rr = (tp2 - entry) / risk
     else:
         structure_sl = float(df["high"].iloc[hi_idx[-1]]) if hi_idx else entry + 1.5 * atr_val
@@ -40,19 +43,17 @@ def build_trade_levels(
         risk = stop - entry
         if risk <= 0:
             return None
-        tp1 = entry - risk * 1.5
-        tp2 = entry - risk * preferred_rr
-        tp3 = entry - risk * max(preferred_rr, 4.0)
+        tp1 = entry - risk * rr_tp1
+        tp2 = entry - risk * rr_tp2
+        tp3 = entry - risk * rr_tp3
         rr = (entry - tp2) / risk
 
     if rr < min_rr:
         return None
 
     risk_amount = account_balance * risk_pct
-    # Position size in contracts/coins ≈ risk_amount / stop distance
     position_size = risk_amount / risk if risk else 0.0
 
-    # Reject absurd stop (e.g. > 8% of price) as unacceptable risk distance
     if risk / entry > 0.08:
         return None
 
@@ -65,4 +66,7 @@ def build_trade_levels(
         risk_reward=round(rr, 2),
         position_size=round(position_size, 6),
         risk_amount=round(risk_amount, 4),
+        rr_tp1=rr_tp1,
+        rr_tp2=rr_tp2,
+        rr_tp3=rr_tp3,
     )

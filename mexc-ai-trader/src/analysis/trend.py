@@ -134,12 +134,22 @@ def analyze_trend(frames: dict[str, pd.DataFrame]) -> FactorResult:
 
 
 def higher_tf_summary(frames: dict[str, pd.DataFrame]) -> str:
+    """Format like: 1H SELL · 4H SELL · D SELL"""
     parts = []
-    for tf, label in (("Hour4", "4H"), ("Day1", "Daily")):
+    for tf, label in (("Min60", "1H"), ("Hour4", "4H"), ("Day1", "D")):
         df = frames.get(tf)
         if df is None or len(df) < 210:
-            parts.append(f"{label}: n/a")
+            # Fall back to Min15 bias label if 1H missing in ultra-fast mode
+            if tf == "Min60":
+                df15 = frames.get("Min15")
+                if df15 is not None and len(df15) >= 210:
+                    d, _, _ = _ema_alignment(df15["close"])
+                    side = "BUY" if d == Direction.LONG else "SELL" if d == Direction.SHORT else "WAIT"
+                    parts.append(f"{label} {side}")
+                    continue
+            parts.append(f"{label} n/a")
             continue
         d, _, _ = _ema_alignment(df["close"])
-        parts.append(f"{label}: {d.value}")
-    return " | ".join(parts)
+        side = "BUY" if d == Direction.LONG else "SELL" if d == Direction.SHORT else "WAIT"
+        parts.append(f"{label} {side}")
+    return " · ".join(parts)

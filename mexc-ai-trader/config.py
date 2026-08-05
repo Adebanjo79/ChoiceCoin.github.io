@@ -78,7 +78,7 @@ class Settings:
     min_aligned_factors: int = field(default_factory=lambda: _env_int("MIN_ALIGNED_FACTORS", 2))
     risk_pct: float = 0.01
     min_rr: float = 2.5
-    preferred_rr: float = 3.0
+    preferred_rr: float = 2.5  # TP2 R:R (TP1=2.0, TP2=2.5, TP3=3.5)
     volume_spike_mult: float = 1.5
     adx_min: float = 25.0
     news_blackout_minutes: int = 60
@@ -88,8 +88,8 @@ class Settings:
     def active_timeframes(self) -> tuple[str, ...]:
         if self.scan_mode == "full":
             return self.timeframes
-        # Fast path still covers short + higher TF confirmation
-        return ("Min15", "Hour4", "Day1")
+        # Fast path: 15m entry + 1H/4H/D confirmation (FutureTradeBot-style HTF)
+        return ("Min15", "Min60", "Hour4", "Day1")
 
     def telegram_ready(self) -> bool:
         return bool(self.telegram_bot_token and self.telegram_chat_id)

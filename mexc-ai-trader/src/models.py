@@ -45,6 +45,9 @@ class TradeLevels:
     risk_reward: float
     position_size: float
     risk_amount: float
+    rr_tp1: float = 2.0
+    rr_tp2: float = 2.5
+    rr_tp3: float = 3.5
 
 
 @dataclass
@@ -61,6 +64,9 @@ class SignalReport:
     invalidation: list[str] = field(default_factory=list)
     major_risks: list[str] = field(default_factory=list)
     factor_scores: dict[str, float] = field(default_factory=dict)
+    factor_aligned: dict[str, bool] = field(default_factory=dict)
+    factor_weights: dict[str, float] = field(default_factory=dict)
+    price: float | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     def is_actionable(self) -> bool:
@@ -70,3 +76,10 @@ class SignalReport:
             Verdict.SELL,
             Verdict.STRONG_SELL,
         } and self.direction in {Direction.LONG, Direction.SHORT}
+
+    def side_label(self) -> str:
+        if self.direction == Direction.LONG:
+            return "BUY · LONG"
+        if self.direction == Direction.SHORT:
+            return "SELL · SHORT"
+        return "NO TRADE"
