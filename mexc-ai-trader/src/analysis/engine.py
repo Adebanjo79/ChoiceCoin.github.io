@@ -135,8 +135,10 @@ def analyze_symbol(
         "Breakout" in d or "Breakdown" in d for d in next(f for f in factors if f.name == "Price Action").details
     ):
         reject_reasons.append("Low liquidity without clear breakout")
-    if not fund.aligned and any("blackout" in d.lower() or "wait" in d.lower() for d in fund.details):
-        reject_reasons.append("Major news / macro window within 30–60 minutes")
+    if any("fundamental blackout" in d.lower() for d in fund.details) or (
+        any("major news keywords" in d.lower() for d in fund.details)
+    ):
+        reject_reasons.append("Major news keywords active — skip trade")
 
     # Require a minimum number of aligned pillars (default 2) instead of all five
     min_aligned = getattr(settings, "min_aligned_factors", 2)

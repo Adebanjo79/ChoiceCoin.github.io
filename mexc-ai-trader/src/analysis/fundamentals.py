@@ -73,15 +73,14 @@ def _news_headlines(api_key: str, query: str = "bitcoin OR ethereum OR crypto OR
 
 
 def news_blackout_active(headlines: list[str], blackout_minutes: int = 60) -> tuple[bool, str]:
-    """Heuristic: if major macro keywords appear in recent headlines, advise wait."""
+    """Hard-block only on clear macro headline keywords (not time-of-day guesses)."""
     now = datetime.now(timezone.utc)
-    # Without precise calendar timestamps, flag when keywords dominate recent news.
     hits = [h for h in headlines if any(k.lower() in h.lower() for k in KNOWN_EVENT_HINTS)]
-    # Also soft blackout around typical US data release hours (12:30–14:30 UTC) on weekdays
-    if now.weekday() < 5 and 12 <= now.hour <= 14 and now.minute < blackout_minutes:
-        return True, "Soft macro release window (UTC ~12:30–14:30) — wait 30–60m if event due"
     if hits:
         return True, f"Major news keywords in headlines: {hits[0][:80]}"
+    # Soft note only — does NOT hard-block trades by itself
+    if now.weekday() < 5 and 12 <= now.hour <= 14:
+        return False, "Note: typical US macro window (UTC ~12:30–14:30) — trade carefully"
     return False, "No immediate macro blackout detected"
 
 
