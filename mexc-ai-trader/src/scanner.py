@@ -157,15 +157,6 @@ class MarketScanner:
             waiting_until=0.0,
             last_error="",
         )
-        # One short “started” ping (like NFT bot "Copying...")
-        if self.telegram.enabled:
-            self.telegram.send(
-                f"🔎 Futures scanning…\n"
-                f"Pairs: {total}/{total_all} (top liquid)\n"
-                f"Mode: {self.settings.scan_mode} | TF: {tfs}\n"
-                f"Min confidence: {self.settings.min_confidence:.0f}%"
-            )
-
         fundamentals = analyze_fundamentals(self.settings.newsapi_key, symbol="BTC_USDT")
         btc_df = None
         try:
@@ -221,35 +212,40 @@ class MarketScanner:
                     )
 
                 near = sorted(results, key=lambda r: r.confidence, reverse=True)[:3]
+                block_reasons: list[str] = []
+                for r in near:
+                    if not r.is_actionable() and r.why_valid:
+                        block_reasons.append(f"{r.symbol}: {r.why_valid[0]}")
                 RUNTIME.update(
                     signals_this_cycle=actionable,
-                    closest=[f"{r.symbol}: {r.confidence:.1f}% ({r.verdict.value})" for r in near],
+                    closest=[
+                        f"{r.symbol}: {r.confidence:.1f}% ({r.verdict.value})"
+                        + ("" if r.is_actionable() else f" — {r.why_valid[0] if r.why_valid else 'filtered'}")
+                        for r in near
+                    ],
+                    block_reasons=block_reasons,
                 )
-
-                if done % every == 0 or done == total:
-                    self._status(
-                        f"⏳ Progress: {done}/{total} pairs\n"
-                        f"Signals sent this cycle: {actionable}"
-                    )
 
         near = sorted(
             [r for r in results if not r.is_actionable()],
             key=lambda r: r.confidence,
             reverse=True,
-        )[:3]
+        )[:5]
         near_lines = [
-            f"{r.symbol}: {r.confidence:.1f}% ({r.verdict.value})" for r in near
+            f"{r.symbol}: {r.confidence:.1f}% ({r.verdict.value}) — "
+            f"{(r.why_valid[0] if r.why_valid else 'filtered')}"
+            for r in near
         ] or ["none"]
-        RUNTIME.update(closest=near_lines, done=total, signals_this_cycle=actionable)
-
-        # One short “done” ping (like NFT bot "Done for this mint: 15 ok, 0 failed")
-        if self.telegram.enabled:
-            closest_txt = "\n".join(f"• {x}" for x in near_lines[:3])
-            self.telegram.send(
-                f"✅ Done for this scan: {len(results)} checked, "
-                f"{actionable} signal{'s' if actionable != 1 else ''} sent.\n"
-                f"Closest:\n{closest_txt}"
-            )
+        block_reasons = [
+            f"{r.symbol}: {r.why_valid[0]}" for r in near if r.why_valid
+        ]
+        RUNTIME.update(
+            closest=near_lines,
+            block_reasons=block_reasons,
+            done=total,
+            signals_this_cycle=actionable,
+        )
+        # Telegram stays quiet unless a LONG/SHORT signal is sent above.
         return results
 
     def run_forever(self) -> None:
@@ -263,16 +259,8 @@ class MarketScanner:
             logger.warning("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing — alerts print to console")
         else:
             self.telegram.start_command_listener(RUNTIME.format_message)
-            me = self.telegram.get_me()
-            bot_name = me.get("username") or "futures_bot"
-            self.telegram.send(
-                f"✅ Futures bot ONLINE (@{bot_name})\n"
-                f"Scanning top {self.settings.scan_top_n} liquid pairs\n"
-                f"Min confidence: {self.settings.min_confidence:.0f}%\n"
-                "You’ll get:\n"
-                "• scan start / done updates\n"
-                "• trade signals when ready\n"
-                "• live details when you type: status"
+            logger.info(
+                "Telegram signals-only mode: LONG/SHORT alerts + on-demand status"
             )
         while True:
             self._cycle += 1

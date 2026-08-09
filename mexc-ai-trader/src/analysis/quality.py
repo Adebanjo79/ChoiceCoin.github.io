@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pandas as pd
 
 from src.indicators.technical import atr
@@ -42,12 +40,12 @@ def apply_quality_filters(
     """Return reject reasons (empty list means pass)."""
     rejects: list[str] = []
 
-    # Not news / macro time
+    # Hard news block only (keyword blackout). Soft UTC windows no longer hard-reject.
     joined = " ".join(fund_details).lower()
-    if "blackout" in joined or "wait 30–60" in joined or "wait 30-60" in joined:
-        rejects.append("News/macro window active — skip trade")
-    if "soft macro release window" in joined:
-        rejects.append("Macro release window — skip trade")
+    if "blackout" in joined and "major news keywords" in joined:
+        rejects.append("News/macro blackout — skip trade")
+    if "fundamental blackout" in joined:
+        rejects.append("Fundamental blackout — skip trade")
 
     # Volume > 20-period average
     if require_volume_above_avg:
@@ -55,10 +53,8 @@ def apply_quality_filters(
         if not ok:
             rejects.append(msg)
 
-    # BTC volatility must stay below threshold (avoid chop)
-    if btc_volatility_pct is None:
-        rejects.append("BTC volatility unavailable — skip for safety")
-    elif btc_volatility_pct > max_btc_volatility_pct:
+    # BTC volatility: only reject when we HAVE a reading and it is too high
+    if btc_volatility_pct is not None and btc_volatility_pct > max_btc_volatility_pct:
         rejects.append(
             f"BTC volatility {btc_volatility_pct:.2f}% > max {max_btc_volatility_pct:.2f}% — too choppy"
         )

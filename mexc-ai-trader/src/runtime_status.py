@@ -19,6 +19,7 @@ class RuntimeStatus:
     signals_this_cycle: int = 0
     last_symbol: str = ""
     closest: list[str] = field(default_factory=list)
+    block_reasons: list[str] = field(default_factory=list)
     last_signal: str = "none yet"
     last_error: str = ""
     cycle_started_at: float = 0.0
@@ -45,6 +46,7 @@ class RuntimeStatus:
                 "signals_this_cycle": self.signals_this_cycle,
                 "last_symbol": self.last_symbol,
                 "closest": list(self.closest),
+                "block_reasons": list(self.block_reasons),
                 "last_signal": self.last_signal,
                 "last_error": self.last_error,
                 "cycle_started_at": self.cycle_started_at,
@@ -70,7 +72,9 @@ class RuntimeStatus:
             state = s["phase"]
 
         closest = s["closest"][:3] or ["none yet"]
-        closest_txt = "\n".join(f"✅ {c}" if "BUY" in c or "SELL" in c else f"• {c}" for c in closest)
+        closest_txt = "\n".join(f"• {c}" for c in closest)
+        blocks = s["block_reasons"][:5] or ["none recorded"]
+        blocks_txt = "\n".join(f"• {b}" for b in blocks)
 
         return (
             "📡 Futures bot STATUS\n"
@@ -82,9 +86,12 @@ class RuntimeStatus:
             f"Last alert: {s['last_signal']}\n"
             f"Last coin: {s['last_symbol'] or 'n/a'}\n"
             f"Uptime: {uh}h {um}m {us}s\n"
-            "Closest setups:\n"
+            "Closest (not sent):\n"
             f"{closest_txt}\n"
-            "\nType status anytime · trade alerts send automatically"
+            "Why blocked (top reasons):\n"
+            f"{blocks_txt}\n"
+            "\nTelegram only alerts on LONG/SHORT signals.\n"
+            "Type status anytime for this update."
         )
 
 
