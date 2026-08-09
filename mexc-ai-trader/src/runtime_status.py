@@ -53,38 +53,38 @@ class RuntimeStatus:
             }
 
     def format_message(self) -> str:
+        """Clear NFT-bot-style status card."""
         s = self.snapshot()
         uptime = int(time.time() - s["started_at"])
         uh, rem = divmod(uptime, 3600)
         um, us = divmod(rem, 60)
 
         if s["phase"] == "scanning" and s["scan_target"]:
-            pct = 100.0 * s["done"] / max(s["scan_target"], 1)
-            progress = f"{s['done']}/{s['scan_target']} ({pct:.1f}%)"
+            state = f"Scanning… {s['done']}/{s['scan_target']}"
         elif s["phase"] == "waiting":
             left = max(0, int(s["waiting_until"] - time.time()))
-            progress = f"waiting {left // 60}m {left % 60}s until next scan"
+            state = f"Waiting {left // 60}m {left % 60}s for next scan"
+        elif s["phase"] == "error":
+            state = f"Error: {s['last_error'] or 'unknown'}"
         else:
-            progress = s["phase"]
+            state = s["phase"]
 
         closest = s["closest"][:3] or ["none yet"]
-        closest_txt = "\n".join(f"• {c}" for c in closest)
+        closest_txt = "\n".join(f"✅ {c}" if "BUY" in c or "SELL" in c else f"• {c}" for c in closest)
 
         return (
-            "📊 MEXC Bot STATUS\n"
-            f"State: {s['phase'].upper()}\n"
+            "📡 Futures bot STATUS\n"
+            f"State: {state}\n"
             f"Cycle: #{s['cycle']}\n"
-            f"Mode: {s['mode'] or 'n/a'}\n"
-            f"Min confidence: {s['min_confidence']}%\n"
-            f"Progress: {progress}\n"
-            f"Market size: {s['total_market']} pairs\n"
+            f"Mode: {s['mode'] or 'n/a'} | Min confidence: {s['min_confidence']:.0f}%\n"
+            f"Universe: top {s['scan_target'] or 0} / {s['total_market'] or 0} pairs\n"
             f"Signals this cycle: {s['signals_this_cycle']}\n"
-            f"Last coin checked: {s['last_symbol'] or 'n/a'}\n"
-            f"Last trade alert: {s['last_signal']}\n"
+            f"Last alert: {s['last_signal']}\n"
+            f"Last coin: {s['last_symbol'] or 'n/a'}\n"
             f"Uptime: {uh}h {um}m {us}s\n"
             "Closest setups:\n"
             f"{closest_txt}\n"
-            "\nType status anytime for a live update."
+            "\nType status anytime · trade alerts send automatically"
         )
 
 

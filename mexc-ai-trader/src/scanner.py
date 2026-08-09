@@ -157,14 +157,14 @@ class MarketScanner:
             waiting_until=0.0,
             last_error="",
         )
-        self._status(
-            f"🔎 Fast scan started\n"
-            f"Analyzing: {total} of {total_all} pairs\n"
-            f"Mode: {self.settings.scan_mode}\n"
-            f"Timeframes: {tfs}\n"
-            f"Min confidence: {self.settings.min_confidence}%\n"
-            f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
-        )
+        # One short “started” ping (like NFT bot "Copying...")
+        if self.telegram.enabled:
+            self.telegram.send(
+                f"🔎 Futures scanning…\n"
+                f"Pairs: {total}/{total_all} (top liquid)\n"
+                f"Mode: {self.settings.scan_mode} | TF: {tfs}\n"
+                f"Min confidence: {self.settings.min_confidence:.0f}%"
+            )
 
         fundamentals = analyze_fundamentals(self.settings.newsapi_key, symbol="BTC_USDT")
         btc_df = None
@@ -242,12 +242,14 @@ class MarketScanner:
         ] or ["none"]
         RUNTIME.update(closest=near_lines, done=total, signals_this_cycle=actionable)
 
-        self._status(
-            f"✅ Scan finished\n"
-            f"Checked: {len(results)}/{total}\n"
-            f"Signals sent: {actionable}\n"
-            f"Closest (not enough yet):\n" + "\n".join(f"• {x}" for x in near_lines)
-        )
+        # One short “done” ping (like NFT bot "Done for this mint: 15 ok, 0 failed")
+        if self.telegram.enabled:
+            closest_txt = "\n".join(f"• {x}" for x in near_lines[:3])
+            self.telegram.send(
+                f"✅ Done for this scan: {len(results)} checked, "
+                f"{actionable} signal{'s' if actionable != 1 else ''} sent.\n"
+                f"Closest:\n{closest_txt}"
+            )
         return results
 
     def run_forever(self) -> None:
@@ -261,9 +263,16 @@ class MarketScanner:
             logger.warning("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing — alerts print to console")
         else:
             self.telegram.start_command_listener(RUNTIME.format_message)
-            # No auto ONLINE/scan spam. User types "status"; signals send automatically.
-            logger.info(
-                "Telegram quiet mode: signals only + on-demand status (type status in chat)"
+            me = self.telegram.get_me()
+            bot_name = me.get("username") or "futures_bot"
+            self.telegram.send(
+                f"✅ Futures bot ONLINE (@{bot_name})\n"
+                f"Scanning top {self.settings.scan_top_n} liquid pairs\n"
+                f"Min confidence: {self.settings.min_confidence:.0f}%\n"
+                "You’ll get:\n"
+                "• scan start / done updates\n"
+                "• trade signals when ready\n"
+                "• live details when you type: status"
             )
         while True:
             self._cycle += 1
@@ -273,14 +282,9 @@ class MarketScanner:
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Scan cycle failed: %s", exc)
                 RUNTIME.update(phase="error", last_error=str(exc))
-                self.telegram.send(f"⚠️ MEXC scanner error: {exc}")
+                self.telegram.send(f"⚠️ Futures scanner error: {exc}")
             elapsed = time.time() - started
             sleep_for = max(5, self.settings.scan_interval_seconds - int(elapsed))
             logger.info("Cycle done in %.1fs — sleeping %ss", elapsed, sleep_for)
             RUNTIME.update(phase="waiting", waiting_until=time.time() + sleep_for)
-            self._status(
-                f"😴 Waiting {sleep_for // 60}m {sleep_for % 60}s until next scan\n"
-                f"Cycle #{self._cycle} finished in {int(elapsed)}s\n"
-                "Bot is still running."
-            )
             time.sleep(sleep_for)
