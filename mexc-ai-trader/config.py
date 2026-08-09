@@ -79,7 +79,7 @@ class Settings:
     risk_pct: float = 0.01
     min_rr: float = 2.5
     preferred_rr: float = 2.5  # TP2 R:R (TP1=2.0, TP2=2.5, TP3=3.5)
-    volume_spike_mult: float = 1.5
+    volume_spike_mult: float = 1.3  # FutureTradeBot-style volume gate (>=1.3x OK)
     adx_min: float = 25.0
     news_blackout_minutes: int = 60
     kline_limit: int = 220

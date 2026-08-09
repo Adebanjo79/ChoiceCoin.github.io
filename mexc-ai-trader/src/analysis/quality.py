@@ -18,15 +18,22 @@ def btc_atr_pct(btc_df: pd.DataFrame | None) -> float | None:
     return (atr_val / price) * 100.0
 
 
-def volume_above_avg(df: pd.DataFrame | None, length: int = 20) -> tuple[bool, str]:
+def volume_above_avg(
+    df: pd.DataFrame | None,
+    length: int = 20,
+    min_mult: float = 1.0,
+) -> tuple[bool, str]:
+    """FutureTradeBot-style: require volume >= min_mult × 20-SMA (default 1.3x when gated)."""
     if df is None or len(df) < length + 2:
         return False, "Volume check failed (insufficient data)"
     avg = float(df["volume"].iloc[-(length + 1) : -1].mean())
     cur = float(df["volume"].iloc[-1])
     if avg <= 0:
         return False, "Volume check failed (zero average)"
-    ok = cur > avg
-    return ok, f"Volume {cur:.2f} vs {length}-avg {avg:.2f} ({'OK' if ok else 'TOO LOW'})"
+    ratio = cur / avg
+    ok = ratio >= min_mult
+    tag = f">={min_mult:.1f}x OK" if ok else f"<{min_mult:.1f}x weak"
+    return ok, f"Volume {ratio:.2f}x {length}-SMA ({tag})"
 
 
 def apply_quality_filters(
@@ -36,6 +43,7 @@ def apply_quality_filters(
     btc_volatility_pct: float | None,
     max_btc_volatility_pct: float,
     require_volume_above_avg: bool,
+    volume_min_mult: float = 1.3,
 ) -> list[str]:
     """Return reject reasons (empty list means pass)."""
     rejects: list[str] = []
@@ -47,9 +55,9 @@ def apply_quality_filters(
     if "fundamental blackout" in joined:
         rejects.append("Fundamental blackout — skip trade")
 
-    # Volume > 20-period average
+    # Volume >= N× 20-period SMA (FutureTradeBot uses 1.3x)
     if require_volume_above_avg:
-        ok, msg = volume_above_avg(primary, 20)
+        ok, msg = volume_above_avg(primary, 20, min_mult=volume_min_mult)
         if not ok:
             rejects.append(msg)
 

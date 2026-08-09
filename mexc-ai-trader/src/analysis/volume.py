@@ -44,7 +44,7 @@ def analyze_volume(df: pd.DataFrame, spike_mult: float = 1.5) -> FactorResult:
         else:
             details.append("Spike on doji — weak")
     else:
-        details.append("No 1.5x volume confirmation")
+        details.append(f"No {spike_mult}x volume confirmation")
 
     if obv_slope > 0:
         bull += 1

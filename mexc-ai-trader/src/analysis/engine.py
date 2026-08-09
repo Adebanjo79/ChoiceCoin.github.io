@@ -16,6 +16,7 @@ from src.analysis.smc import analyze_smc
 from src.analysis.trend import analyze_trend, higher_tf_summary
 from src.analysis.volume import analyze_volume
 from src.analysis.quality import apply_quality_filters, btc_atr_pct
+from src.analysis.why_valid import build_why_valid
 from src.models import NO_TRADE_MSG, Direction, FactorResult, SignalReport, Verdict
 from src.risk import build_trade_levels
 
@@ -70,11 +71,11 @@ def _verdict(direction: Direction, confidence: float, min_confidence: float = 80
 
 def _holding_time(tf_primary: str = "Min15") -> str:
     return {
-        "Min15": "2h – 12h",
-        "Min60": "4h – 24h",
-        "Hour4": "12h – 5d",
-        "Day1": "3d – 3w",
-    }.get(tf_primary, "2h – 12h")
+        "Min15": "2h-12h",
+        "Min60": "4h-24h",
+        "Hour4": "12h-5d",
+        "Day1": "3d-3w",
+    }.get(tf_primary, "2h-12h")
 
 
 def analyze_symbol(
@@ -108,18 +109,17 @@ def analyze_symbol(
 
     aligned_keys = [f.name for f in factors if f.name in KEY_FACTORS and f.aligned]
     missing = [name for name in KEY_FACTORS if name not in aligned_keys]
-    why: list[str] = []
-    for f in factors:
-        # Pull concrete checklist lines for the FutureTradeBot-style "Why valid"
-        if f.direction == direction or f.aligned:
-            why.extend(f.details[:3])
-    # Deduplicate while preserving order
-    seen: set[str] = set()
-    why = [w for w in why if not (w in seen or seen.add(w))][:10]
+    # FutureTradeBot-style checklist (EMA / RSI / MACD / Volume / OBV / S/R)
+    why = build_why_valid(primary, direction)
 
     htf = higher_tf_summary(frames)
     factor_scores = {f.name: round(f.score, 2) for f in factors}
-    factor_aligned = {f.name: bool(f.aligned) for f in factors}
+    # Checkmark when factor agrees with trade direction (their bot style),
+    # or when explicitly aligned.
+    factor_aligned = {
+        f.name: bool(f.aligned or (direction != Direction.NONE and f.direction == direction))
+        for f in factors
+    }
     factor_weights = {f.name: float(f.weight) for f in factors}
     price = float(primary["close"].iloc[-1]) if primary is not None and len(primary) else None
 
@@ -156,10 +156,9 @@ def analyze_symbol(
             btc_volatility_pct=btc_vol,
             max_btc_volatility_pct=settings.max_btc_volatility_pct,
             require_volume_above_avg=settings.require_volume_above_avg,
+            volume_min_mult=settings.volume_spike_mult,
         )
         reject_reasons.extend(q_rejects)
-        if btc_vol is not None:
-            why.append(f"BTC ATR%={btc_vol:.2f} (max {settings.max_btc_volatility_pct:.2f})")
 
     if direction == Direction.NONE:
         reject_reasons.append("No clear directional alignment across factors")
@@ -199,10 +198,10 @@ def analyze_symbol(
         )
 
     invalidation = [
-        f"Close above structure SL {levels.stop_loss}." if direction == Direction.SHORT
-        else f"Close below structure SL {levels.stop_loss}.",
-        "HTF (4H/D) flips against the trade.",
-        "Volume dries up and price re-enters prior range.",
+        f"Close above structure SL {levels.stop_loss}" if direction == Direction.SHORT
+        else f"Close below structure SL {levels.stop_loss}",
+        "HTF (4H/D) flip against position",
+        "Volume dries up and price re-enters prior range",
     ]
     risks = [
         "Crypto volatility / wick stop-outs.",
@@ -270,12 +269,13 @@ def format_report(report: SignalReport) -> str:
     side = report.side_label()
     price = report.price if report.price is not None else lv.entry
 
+    emoji = "🟢" if report.direction == Direction.LONG else "🔴"
     lines = [
-        side,
-        report.symbol,
-        f"MEXC · TF 15m · Confidence {report.confidence:.0f}%",
+        f"{emoji} {side} {report.symbol}",
+        f"Confidence: {report.confidence:.0f}%",
+        "Timeframe: 15m",
         f"HTF: {report.higher_tf_trend}",
-        f"Price: {price}",
+        f"Current Price: {price}",
         "",
         "Why valid",
         *[f"• {w}" for w in report.why_valid[:8]],
@@ -288,24 +288,19 @@ def format_report(report: SignalReport) -> str:
         mark = "✓" if report.factor_aligned.get(name) else ""
         lines.append(f"• {label}: {score:.0f}% (w{w}%) {mark}".rstrip())
 
+    hold = report.estimated_holding_time.replace(" – ", "-").replace(" ", "")
     lines.extend(
         [
             "",
             f"Entry: {lv.entry}",
-            f"SL: {lv.stop_loss}",
+            f"Stop Loss: {lv.stop_loss}",
             f"TP1: {lv.take_profit_1} (R:R {lv.rr_tp1:.2f})",
             f"TP2: {lv.take_profit_2} (R:R {lv.rr_tp2:.2f})",
             f"TP3: {lv.take_profit_3} (R:R {lv.rr_tp3:.2f})",
-            f"Size (1% risk): {lv.position_size}  (risk ${lv.risk_amount})",
-            f"Est. hold: {report.estimated_holding_time}",
+            f"Est. hold: {hold or report.estimated_holding_time}",
             "",
             "Invalidation",
             *[f"• {x}" for x in report.invalidation],
-            "",
-            "Major risks",
-            *[f"• {x}" for x in report.major_risks],
-            "",
-            f"Verdict: {report.verdict.value}",
         ]
     )
     return "\n".join(lines)
