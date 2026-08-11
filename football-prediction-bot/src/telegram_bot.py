@@ -29,27 +29,19 @@ COMMANDS = [
 ]
 
 HELP_TEXT = (
-    "⚽ Daily Fixture Odds Bot\n"
-    "Today's matches → ≈3 / ≈5 / ≈50 odds + SportyBet codes\n"
+    "⚽ Careful Acca Bot\n"
+    "Multi-match tickets + SportyBet booking codes\n"
     "─" * 28 + "\n"
-    "📅 FIXTURES\n"
-    "• /fixtures — today's matches + dates\n\n"
-    "🎯 TIPS\n"
-    "• /tips — full daily board\n"
-    "• /3odd — ≈3.0 odds singles\n"
-    "• /5odd — ≈5.0 odds singles\n"
-    "• /50odd — ≈50 odds singles\n\n"
-    "🎫 SPORTYBET\n"
-    "• /codes — booking codes (easy copy)\n"
-    "• /sportybet — same as /codes\n"
-    "  Load: SportyBet → Betslip → Booking Code → Load\n\n"
-    "🔄 REFRESH\n"
-    "• /safety or /refresh — scan now\n\n"
-    "📡 SYSTEM\n"
-    "• /status — health / last scan\n"
-    "• /ping — alive check\n"
-    "• /help — this menu\n\n"
-    "Not betting advice. Stake responsibly."
+    "🛡️ /3odd — ≈3.0 odds · exactly 3 matches · several OPTIONS\n"
+    "🎯 /5odd — ≈5.0 odds · 3–5 matches · several OPTIONS\n"
+    "🚀 /50odd — ≈50 odds · 5–15 matches\n"
+    "🎫 /codes — SportyBet codes for every option\n"
+    "📅 /fixtures — fixture list\n"
+    "📋 /tips — full board\n"
+    "🔄 /safety — refresh now\n"
+    "📡 /status · /ping\n\n"
+    "Each option shows avg/min confidence + SportyBet code.\n"
+    "Not betting advice. Accumulators lose if any leg fails."
 )
 
 
@@ -157,8 +149,9 @@ class TelegramCommandBot:
                 return self.on_safety_refresh()
             return "Refresh not available in this mode. Run: python main.py --daemon"
         return (
-            "Unknown command. Send /help for the full menu.\n"
-            "Quick: /tips /fixtures /3odd /5odd /50odd /codes /safety /status"
+            "Unknown command. Type /help for the menu.\n"
+            "Examples: /status  /ping  /tips  /safety\n"
+            "(You can also type without slash: status, tips, ping)"
         )
 
     @staticmethod

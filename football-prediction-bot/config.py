@@ -86,16 +86,19 @@ class Settings:
     include_correct_scores: bool = field(
         default_factory=lambda: _env_bool("INCLUDE_CORRECT_SCORES", True)
     )
-    # Accumulator leg counts
-    # 3-odd safest: 1, 2 or 3 games combining to ~3.0
-    acca3_min_legs: int = field(default_factory=lambda: _env_int("ACCA3_MIN_LEGS", 1))
+    # Accumulator leg counts (careful multi-match tickets)
+    # ≈3.0 → exactly 3 matches, multiple options
+    acca3_min_legs: int = field(default_factory=lambda: _env_int("ACCA3_MIN_LEGS", 3))
     acca3_max_legs: int = field(default_factory=lambda: _env_int("ACCA3_MAX_LEGS", 3))
-    # 5-odd: more than 3 games
-    acca5_min_legs: int = field(default_factory=lambda: _env_int("ACCA5_MIN_LEGS", 4))
-    acca5_max_legs: int = field(default_factory=lambda: _env_int("ACCA5_MAX_LEGS", 6))
-    # 50-odd: even more games
-    acca50_min_legs: int = field(default_factory=lambda: _env_int("ACCA50_MIN_LEGS", 7))
-    acca50_max_legs: int = field(default_factory=lambda: _env_int("ACCA50_MAX_LEGS", 12))
+    acca3_options: int = field(default_factory=lambda: _env_int("ACCA3_OPTIONS", 3))
+    # ≈5.0 → 3 to 5 matches, multiple options
+    acca5_min_legs: int = field(default_factory=lambda: _env_int("ACCA5_MIN_LEGS", 3))
+    acca5_max_legs: int = field(default_factory=lambda: _env_int("ACCA5_MAX_LEGS", 5))
+    acca5_options: int = field(default_factory=lambda: _env_int("ACCA5_OPTIONS", 3))
+    # ≈50 → 5 to 15 matches
+    acca50_min_legs: int = field(default_factory=lambda: _env_int("ACCA50_MIN_LEGS", 5))
+    acca50_max_legs: int = field(default_factory=lambda: _env_int("ACCA50_MAX_LEGS", 15))
+    acca50_options: int = field(default_factory=lambda: _env_int("ACCA50_OPTIONS", 2))
     # Per-leg odds window for safer multi building
     acca_leg_odds_min: float = field(default_factory=lambda: _env_float("ACCA_LEG_ODDS_MIN", 1.20))
     acca_leg_odds_max: float = field(default_factory=lambda: _env_float("ACCA_LEG_ODDS_MAX", 2.35))

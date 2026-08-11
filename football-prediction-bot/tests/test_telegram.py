@@ -155,6 +155,7 @@ def test_safety_sends_progress_then_result():
 
 
 def test_sportybet_codes_report_format():
+    from src.accumulator import Accumulator
     from src.daily_board import DailyBoard, format_sportybet_codes_report
     from src.sportybet import SportyBetBooking
 
@@ -178,24 +179,54 @@ def test_sportybet_codes_report_format():
             confidence=80,
             edge=0.02,
         ),
-        sportybet_code="ABC111",
-        sportybet_url="https://www.sportybet.com/ng/?shareCode=ABC111",
+    )
+    # Need 3 legs for a 3odd-style option display
+    tips = []
+    for i in range(3):
+        tips.append(
+            Tip(
+                Fixture(
+                    id=str(i + 1),
+                    league_code="PL",
+                    league_name="PL",
+                    kickoff=kick,
+                    home_team=f"H{i}",
+                    away_team=f"A{i}",
+                ),
+                MarketPrediction(
+                    market="home_or_draw",
+                    market_label="1X",
+                    probability=0.6,
+                    fair_odds=1.45,
+                    book_odds=1.45,
+                    confidence=80,
+                    edge=0.02,
+                ),
+            )
+        )
+    acc = Accumulator(
+        legs=tips,
+        band_key="3odd",
+        target_odds=3.0,
+        label="Option 1 · 3 matches",
+        option_index=1,
+        sportybet_code="MULTI3",
+        sportybet_url="https://www.sportybet.com/ng/?shareCode=MULTI3",
     )
     board = DailyBoard(
         fixtures=[fixture],
-        tips_3=[tip],
-        tips_5=[],
-        tips_50=[],
         day_label="Mon",
+        accus={"3odd": [acc], "5odd": [], "50odd": []},
+        tips_3=tips,
         band_codes={
             "3odd": SportyBetBooking(
                 share_code="MULTI3",
                 share_url="https://www.sportybet.com/ng/?shareCode=MULTI3",
-                matched=1,
+                matched=3,
             )
         },
     )
     text = format_sportybet_codes_report(board)
     assert "SPORTYBET BOOKING CODES" in text
-    assert "MULTI CODE: MULTI3" in text
-    assert "Code: ABC111" in text
+    assert "MULTI3" in text
+    assert "Option 1" in text

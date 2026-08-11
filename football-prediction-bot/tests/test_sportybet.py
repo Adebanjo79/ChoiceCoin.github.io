@@ -92,47 +92,64 @@ def test_book_tip_attaches_code():
 
 def test_daily_report_shows_sportybet_code():
     from config import Settings
-    from src.daily_board import DailyBoard, format_daily_odds_report
+    from src.accumulator import Accumulator, AccaSpec
+    from src.daily_board import DailyBoard, format_daily_odds_report, format_sportybet_codes_report
     from src.sportybet import SportyBetBooking
 
     kick = datetime(2026, 8, 3, 15, 0, tzinfo=timezone.utc)
-    fixture = Fixture(
-        id="1",
-        league_code="PL",
-        league_name="Premier League",
-        kickoff=kick,
-        home_team="A",
-        away_team="B",
-    )
-    tip = Tip(
-        fixture,
-        MarketPrediction(
-            market="draw",
-            market_label="Draw (X)",
-            probability=0.34,
-            fair_odds=3.0,
-            book_odds=3.05,
-            confidence=80,
-            edge=0.05,
-        ),
-        sportybet_code="ZZ9K21",
-        sportybet_url="https://www.sportybet.com/ng/?shareCode=ZZ9K21",
+    tips = []
+    for i in range(3):
+        tips.append(
+            Tip(
+                Fixture(
+                    id=str(i + 1),
+                    league_code="PL",
+                    league_name="Premier League",
+                    kickoff=kick,
+                    home_team=f"H{i}",
+                    away_team=f"A{i}",
+                ),
+                MarketPrediction(
+                    market="home_or_draw",
+                    market_label="1X",
+                    probability=0.6,
+                    fair_odds=1.4,
+                    book_odds=1.4,
+                    confidence=80,
+                    edge=0.05,
+                ),
+            )
+        )
+    acc = Accumulator(
+        legs=tips,
+        band_key="3odd",
+        target_odds=3.0,
+        label="Option 1 · 3 matches",
+        option_index=1,
+        sportybet_code="BAND3X",
+        sportybet_url="https://www.sportybet.com/ng/?shareCode=BAND3X",
     )
     board = DailyBoard(
-        fixtures=[fixture],
-        tips_3=[tip],
-        tips_5=[],
-        tips_50=[],
+        fixtures=[tips[0].fixture],
         day_label="Mon 03 Aug 2026",
+        accus={"3odd": [acc], "5odd": [], "50odd": []},
+        specs={
+            "3odd": AccaSpec("3odd", "≈3", 3.0, 0.75, 75, 3, 3),
+            "5odd": AccaSpec("5odd", "≈5", 5.0, 1.25, 70, 3, 5),
+            "50odd": AccaSpec("50odd", "≈50", 50.0, 20, 60, 5, 15),
+        },
+        tips_3=tips,
         band_codes={
             "3odd": SportyBetBooking(
                 share_code="BAND3X",
                 share_url="https://www.sportybet.com/ng/?shareCode=BAND3X",
-                matched=1,
+                matched=3,
             )
         },
     )
     report = format_daily_odds_report(board, Settings())
-    assert "SportyBet code: ZZ9K21" in report
-    assert "SportyBet BOOKING CODE: BAND3X" in report
+    assert "BAND3X" in report
+    assert "Option 1" in report
     assert "sportybet.com" in report
+    codes = format_sportybet_codes_report(board)
+    assert "CODE: BAND3X" in codes

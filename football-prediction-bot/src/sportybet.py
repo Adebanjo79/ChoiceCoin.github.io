@@ -432,3 +432,45 @@ def book_band_codes(
                 booking.matched,
             )
     return out
+
+
+def book_accumulator_options(
+    accus_by_band: dict[str, list],
+    *,
+    country: str = DEFAULT_COUNTRY,
+    client: SportyBetClient | None = None,
+) -> dict[str, SportyBetBooking]:
+    """Attach a SportyBet booking code to every accumulator option.
+
+    Returns a map of first-option codes per band (for status summaries).
+    """
+    if not SPORTYBET_AVAILABLE:
+        return {}
+    sb = client or SportyBetClient(country=country)
+    first_codes: dict[str, SportyBetBooking] = {}
+    for band, accus in accus_by_band.items():
+        for acc in accus:
+            try:
+                booking = sb.book_tips_multi(list(acc.legs))
+            except Exception as exc:  # pragma: no cover
+                logger.warning("SportyBet option %s failed: %s", acc.label, exc)
+                continue
+            if not booking:
+                continue
+            acc.sportybet_code = booking.share_code
+            acc.sportybet_url = booking.share_url
+            # also stamp legs for /codes detail views
+            for leg in acc.legs:
+                if not leg.sportybet_code:
+                    leg.sportybet_code = booking.share_code
+                    leg.sportybet_url = booking.share_url
+            if band not in first_codes:
+                first_codes[band] = booking
+            logger.info(
+                "SportyBet %s %s code=%s legs=%d",
+                band,
+                acc.label,
+                booking.share_code,
+                booking.matched,
+            )
+    return first_codes

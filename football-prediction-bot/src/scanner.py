@@ -27,8 +27,7 @@ from src.models import Fixture, TeamForm, Tip
 from src.runtime_status import RuntimeStatus
 from src.sportybet import (
     SportyBetClient,
-    attach_sportybet_codes,
-    book_band_codes,
+    book_accumulator_options,
     sportybet_enabled,
 )
 from src.telegram_alerter import TelegramAlerter
@@ -211,26 +210,22 @@ class PredictionScanner:
             logger.info("SportyBet booking codes disabled")
             return
         client = SportyBetClient(country=self.settings.sportybet_country)
-        tips = [*board.tips_3, *board.tips_5, *board.tips_50]
-        attach_sportybet_codes(
-            tips,
+        board.band_codes = book_accumulator_options(
+            board.accus,
             country=self.settings.sportybet_country,
             client=client,
         )
-        board.band_codes = book_band_codes(
-            {
-                "3odd": board.tips_3,
-                "5odd": board.tips_5,
-                "50odd": board.tips_50,
-            },
-            country=self.settings.sportybet_country,
-            client=client,
+        coded = sum(
+            1
+            for group in board.accus.values()
+            for acc in group
+            if acc.sportybet_code
         )
-        coded = sum(1 for t in tips if t.sportybet_code)
+        total = sum(len(v) for v in board.accus.values())
         logger.info(
-            "SportyBet: %d/%d tip codes, band codes=%s",
+            "SportyBet: %d/%d ticket options coded, first=%s",
             coded,
-            len(tips),
+            total,
             {k: v.share_code for k, v in board.band_codes.items()},
         )
 
@@ -254,37 +249,41 @@ class PredictionScanner:
             self._cached_band_reports = {
                 "3odd": format_band_singles(
                     board.tips_3,
-                    "🛡️ DAILY ≈3.0 ODDS",
+                    "🛡️ ≈3.0 ODDS — 3 MATCHES",
                     self.settings.target_odds,
                     self.settings.safety_min_confidence,
                     band_key="3odd",
                     band_codes=board.band_codes,
+                    board=board,
                 ),
                 "5odd": format_band_singles(
                     board.tips_5,
-                    "🎯 DAILY ≈5.0 ODDS",
+                    "🎯 ≈5.0 ODDS — 3–5 MATCHES",
                     self.settings.target_odds_5,
                     self.settings.odd5_min_confidence,
                     band_key="5odd",
                     band_codes=board.band_codes,
+                    board=board,
                 ),
                 "50odd": format_band_singles(
                     board.tips_50,
-                    "🚀 DAILY ≈50 ODDS",
+                    "🚀 ≈50 ODDS — 5–15 MATCHES",
                     self.settings.target_odds_50,
                     self.settings.odd50_min_confidence,
                     band_key="50odd",
                     band_codes=board.band_codes,
+                    board=board,
                 ),
                 "fixtures": fixtures_report,
                 "codes": codes_report,
             }
 
-            total = len(board.tips_3) + len(board.tips_5) + len(board.tips_50)
+            total = sum(len(v) for v in board.accus.values())
             summary = (
                 f"fixtures:{len(fixtures)} | "
-                f"3odd:{len(board.tips_3)} 5odd:{len(board.tips_5)} "
-                f"50odd:{len(board.tips_50)}"
+                f"3odd:{len(board.accus.get('3odd', []))}opts "
+                f"5odd:{len(board.accus.get('5odd', []))}opts "
+                f"50odd:{len(board.accus.get('50odd', []))}opts"
             )
             self.status.mark_scan(
                 fixtures=len(fixtures),
@@ -298,7 +297,7 @@ class PredictionScanner:
                 if self.telegram.send(report):
                     self.status.mark_telegram_push()
             elif total == 0:
-                logger.info("No daily tips met filters")
+                logger.info("No accumulator tickets met filters")
             return self._cached_tips
         except Exception as exc:  # noqa: BLE001
             logger.exception("Daily scan failed: %s", exc)
@@ -334,11 +333,14 @@ class PredictionScanner:
         logger.info("Scheduled daily fixture odds at %02d:00 UTC", hour)
         if self.telegram.enabled:
             self.telegram.send(
-                "🟢 Daily Fixture Odds Bot online\n"
+                "🟢 Careful Acca Bot online\n"
                 f"Timezone: {self.settings.timezone_name}\n"
-                "Today's fixtures → ≈3 / ≈5 / ≈50 + SportyBet codes\n"
+                "≈3.0 → 3 matches (options)\n"
+                "≈5.0 → 3–5 matches (options)\n"
+                "≈50 → 5–15 matches\n"
+                "Each option has confidence + SportyBet code\n"
                 f"Push time: {hour:02d}:00 UTC\n\n"
-                "Try: /menu /tips /fixtures /3odd /5odd /50odd /codes /safety /status"
+                "Try: /menu /3odd /5odd /50odd /codes /safety /tips"
             )
             self.status.mark_status_push()
 
@@ -368,7 +370,7 @@ class PredictionScanner:
                 }
                 for f in board.fixtures
             ],
-            "3odd": [t.to_dict() for t in board.tips_3],
-            "5odd": [t.to_dict() for t in board.tips_5],
-            "50odd": [t.to_dict() for t in board.tips_50],
+            "3odd": [a.to_dict() for a in board.accus.get("3odd", [])],
+            "5odd": [a.to_dict() for a in board.accus.get("5odd", [])],
+            "50odd": [a.to_dict() for a in board.accus.get("50odd", [])],
         }

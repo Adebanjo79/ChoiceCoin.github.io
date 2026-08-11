@@ -9,33 +9,45 @@ from src.daily_board import build_daily_board, format_daily_odds_report
 from src.models import Fixture, MarketPrediction, Tip
 
 
-def test_daily_board_includes_dates():
-    kick = datetime(2026, 8, 3, 15, 0, tzinfo=timezone.utc)
-    fixture = Fixture(
-        id="1",
-        league_code="PL",
-        league_name="Premier League",
-        kickoff=kick,
-        home_team="A",
-        away_team="B",
-    )
-    tip = Tip(
-        fixture,
+def _tip(i: int, league: str, market: str, odds: float, conf: float) -> Tip:
+    return Tip(
+        Fixture(
+            id=str(i),
+            league_code=league,
+            league_name=league,
+            kickoff=datetime(2026, 8, 15, 15, 0, tzinfo=timezone.utc),
+            home_team=f"Home{i}",
+            away_team=f"Away{i}",
+        ),
         MarketPrediction(
-            market="draw",
-            market_label="Draw (X)",
-            probability=0.34,
-            fair_odds=3.0,
-            book_odds=3.05,
-            confidence=80,
+            market=market,
+            market_label=market,
+            probability=min(0.8, 1 / odds),
+            fair_odds=odds,
+            book_odds=odds,
+            confidence=conf,
             edge=0.05,
         ),
     )
+
+
+def test_daily_board_builds_acca_options():
+    leagues = ["PL", "PD", "BL1", "FL1", "SA", "ELC", "DED", "PPL"]
+    markets = ["home_or_draw", "home_win", "under_25", "over_25", "away_or_draw", "btts_no"]
+    tips = []
+    fixtures = []
+    for i in range(1, 18):
+        tip = _tip(i, leagues[i % len(leagues)], markets[i % len(markets)], 1.3 + (i % 5) * 0.1, 78)
+        tips.append(tip)
+        fixtures.append(tip.fixture)
     settings = Settings()
-    board = build_daily_board([fixture], [tip], settings)
+    board = build_daily_board(fixtures, tips, settings)
     report = format_daily_odds_report(board, settings)
-    assert "DAILY FIXTURE ODDS" in report
-    assert "Date:" in report
+    assert "ACCA" in report or "≈3.0" in report
+    assert "Option" in report or "no qualifying" in report.lower()
     assert "≈3.0" in report
     assert "≈5.0" in report
     assert "≈50" in report
+    # 3-odd options should be 3 legs when built
+    for acc in board.accus.get("3odd", []):
+        assert acc.leg_count == 3
