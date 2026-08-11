@@ -63,12 +63,12 @@ Reattach later: `tmux attach -t football`
 |---------|----------------|
 | `/menu` or `/help` | Full command list |
 | `/fixtures` | Today's matches + dates |
-| `/tips` | Full board: fixtures + ≈3 / ≈5 / ≈50 + SportyBet codes |
-| `/3odd` | Daily ≈3.0 odds + booking code |
-| `/5odd` | Daily ≈5.0 odds + booking code |
-| `/50odd` | Daily ≈50 odds + booking code |
-| `/codes` or `/sportybet` | **Booking codes only** (easy copy/paste) |
-| `/safety` or `/refresh` | Fresh scan now (fixtures + tips + codes) |
+| `/tips` | Full board with all ticket OPTIONS |
+| `/3odd` | ≈3.0 · **exactly 3 matches** · several options + codes |
+| `/5odd` | ≈5.0 · **3–5 matches** · several options + codes |
+| `/50odd` | ≈50 · **5–15 matches** + SportyBet code |
+| `/codes` or `/sportybet` | Booking codes for every option |
+| `/safety` or `/refresh` | Fresh scan now |
 | `/status` | Bot health / last scan |
 | `/ping` | Alive check |
 
