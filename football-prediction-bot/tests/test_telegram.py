@@ -59,6 +59,15 @@ def test_parse_command_strips_bot_mention():
     assert parse_command("/status") == "/status"
 
 
+def test_parse_command_accepts_bare_words():
+    assert parse_command("status") == "/status"
+    assert parse_command("Status") == "/status"
+    assert parse_command("tips") == "/tips"
+    assert parse_command("ping") == "/ping"
+    assert parse_command("safety") == "/safety"
+    assert parse_command("3odd") == "/3odd"
+
+
 def test_status_format_includes_commands():
     status = RuntimeStatus(safety_min_confidence=75, target_odds=3.0, max_daily_tips=3)
     status.mark_scan(fixtures=10, predictions=40, tips=2, summary="Demo tips")

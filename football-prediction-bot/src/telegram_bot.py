@@ -188,8 +188,54 @@ class TelegramCommandBot:
         return len(updates)
 
 
+KNOWN_COMMANDS = {
+    "start",
+    "help",
+    "menu",
+    "commands",
+    "status",
+    "fixtures",
+    "fixture",
+    "matches",
+    "tips",
+    "3odd",
+    "3",
+    "odd3",
+    "safety3",
+    "5odd",
+    "5",
+    "odd5",
+    "50odd",
+    "50",
+    "odd50",
+    "codes",
+    "code",
+    "sportybet",
+    "booking",
+    "sb",
+    "safety",
+    "refresh",
+    "scan",
+    "ping",
+}
+
+
 def parse_command(text: str) -> str:
+    """Normalize Telegram text to a /command.
+
+    Accepts `/status`, `/status@BotName`, and bare `status` / `Status`.
+    """
     if not text:
         return ""
     first = text.strip().split()[0]
-    return re.split(r"@", first, maxsplit=1)[0].lower()
+    first = re.split(r"@", first, maxsplit=1)[0].lower().strip()
+    # Strip leading punctuation users sometimes type
+    first = first.lstrip("./!")
+    if not first:
+        return ""
+    if first.startswith("/"):
+        return first
+    # Bare word → /command when it matches a known command
+    if first in KNOWN_COMMANDS:
+        return f"/{first}"
+    return first
