@@ -38,13 +38,20 @@ def select_best_for_band(
     Pick the best tips for one odds band.
 
     Ranking = confidence + closeness to target odds + edge (+ safety market bonus).
-    One tip per fixture; diversify leagues.
+    One tip per fixture; diversify leagues. Prefer sooner kickoffs.
     """
+    from datetime import datetime, timezone
+
     low = max(1.01, band.target_odds - band.tolerance)
     high = band.target_odds + band.tolerance
+    now = datetime.now(timezone.utc)
 
     eligible: list[Tip] = []
     for tip in tips:
+        market = tip.prediction.market
+        # Correct scores belong in the ≈50 band only
+        if market.startswith("cs_") and band.key in {"3odd", "5odd"}:
+            continue
         if tip.prediction.confidence < band.min_confidence:
             continue
         odds = tip.prediction.display_odds
@@ -52,8 +59,8 @@ def select_best_for_band(
             continue
         # For ~50 band, prefer correct scores / longshot markets
         if band.key == "50odd" and not (
-            tip.prediction.market.startswith("cs_")
-            or tip.prediction.market in {"over_45", "away_win_nil", "home_win_nil"}
+            market.startswith("cs_")
+            or market in {"over_45", "away_win_nil", "home_win_nil"}
         ):
             # still allow if odds naturally land near 50
             pass
@@ -61,10 +68,10 @@ def select_best_for_band(
         proximity = 1.0 - min(1.0, abs(odds - band.target_odds) / max(band.tolerance, 0.01))
         market_bonus = 0.0
         if band.prefer_safety_markets:
-            market_bonus = SAFETY_MARKET_BONUS.get(tip.prediction.market, 0.0)
-        if band.key == "50odd" and tip.prediction.market.startswith("cs_"):
+            market_bonus = SAFETY_MARKET_BONUS.get(market, 0.0)
+        if band.key == "50odd" and market.startswith("cs_"):
             market_bonus += 8.0
-        if band.key == "5odd" and tip.prediction.market in {
+        if band.key == "5odd" and market in {
             "away_win",
             "draw",
             "over_35",
@@ -74,12 +81,19 @@ def select_best_for_band(
         }:
             market_bonus += 4.0
 
-        # Stronger proximity weight so we truly source the *best* match to target odd
+        # Prefer sooner kickoffs (empty-day fallback can span weeks)
+        kick = tip.fixture.kickoff
+        if kick.tzinfo is None:
+            kick = kick.replace(tzinfo=timezone.utc)
+        days_out = max(0.0, (kick - now).total_seconds() / 86400.0)
+        soon_bonus = max(0.0, 15.0 - days_out)
+
         tip.rank_score = (
             tip.prediction.confidence
             + proximity * 35.0
             + max(0.0, tip.prediction.edge) * 40.0
             + market_bonus
+            + soon_bonus
         )
         eligible.append(tip)
 

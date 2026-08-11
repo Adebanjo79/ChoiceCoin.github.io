@@ -90,16 +90,41 @@ Reattach later: `tmux attach -t football`
 
 Only your `TELEGRAM_CHAT_ID` can use the bot.
 
-## Update after new code
+## Bot not working? Fix in 2 minutes
 
 ```bash
+# 1) See if daemon is alive
+tmux ls
+# If you see football → attach:  tmux attach -t football
+# If not listed → session died; restart below
+
+# 2) Pull latest code + restart clean
+tmux kill-session -t football 2>/dev/null
 cd ~/apps/ChoiceCoin.github.io
 git pull origin cursor/football-prediction-bot-53e9
 cd football-prediction-bot
 source .venv/bin/activate
 pip install -r requirements.txt
-# restart daemon
-tmux attach -t football
-# Ctrl+C, then:
+
+# 3) Confirm .env has these lines
+grep -E 'FOOTBALL_DATA|TELEGRAM_|EMPTY_DAY|SPORTYBET' .env
+# Add if missing:
+# EMPTY_DAY_FALLBACK_DAYS=21
+# SPORTYBET_ENABLED=true
+
+# 4) Test once (should print fixtures + tips)
+python main.py --once
+python main.py --test-telegram
+
+# 5) Start daemon again
+tmux new -s football
 python main.py --daemon
+# Detach: Ctrl+B then D
+```
+
+On Telegram: `/ping` → should reply. Then `/safety` (wait 1–2 min) → `/tips`.
+
+Optional helper:
+```bash
+bash scripts/healthcheck.sh
 ```

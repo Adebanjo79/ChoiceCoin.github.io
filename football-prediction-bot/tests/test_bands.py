@@ -43,12 +43,11 @@ def test_correct_scores_exist():
     assert "home_win_nil" in probs
 
 
-def test_best_3odd_band_picks_closest_high_confidence():
+def test_3odd_excludes_correct_scores():
     tips = [
-        _tip("1", "PL", "draw", 3.05, 82),
-        _tip("2", "PD", "away_win", 2.5, 88),
-        _tip("3", "BL1", "draw", 3.5, 70),
-        _tip("4", "FL1", "over_25", 1.9, 90),
+        _tip("1", "PL", "cs_0_0", 3.0, 90),
+        _tip("2", "PD", "draw", 3.05, 80),
+        _tip("3", "BL1", "cs_1_1", 2.9, 88),
     ]
     band = OddsBand(
         key="3odd",
@@ -56,14 +55,12 @@ def test_best_3odd_band_picks_closest_high_confidence():
         target_odds=3.0,
         tolerance=0.75,
         min_confidence=75,
-        max_tips=2,
+        max_tips=3,
         prefer_safety_markets=True,
     )
     selected = select_best_for_band(tips, band)
-    assert 1 <= len(selected) <= 2
-    assert all(t.prediction.confidence >= 75 for t in selected)
-    # Closest to 3.0 among high-conf should rank first
-    assert abs(selected[0].prediction.display_odds - 3.0) <= 0.75
+    assert len(selected) == 1
+    assert selected[0].prediction.market == "draw"
 
 
 def test_5odd_and_50odd_bands():
