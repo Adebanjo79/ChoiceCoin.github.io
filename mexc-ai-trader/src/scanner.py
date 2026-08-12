@@ -31,10 +31,13 @@ class MarketScanner:
         self._alert_cooldown_sec = 60 * 60  # 1h per symbol direction
         self._cycle = 0
         RUNTIME.update(
-            mode=settings.scan_mode,
+            mode=self._mode_label(),
             min_confidence=settings.min_confidence,
             phase="starting",
         )
+
+    def _mode_label(self) -> str:
+        return f"{self.settings.scan_mode}/{self.settings.setup_mode}"
 
     def _status(self, text: str) -> None:
         if self.settings.telegram_status and self.telegram.enabled:
@@ -201,7 +204,7 @@ class MarketScanner:
         RUNTIME.update(
             phase="scanning",
             cycle=self._cycle,
-            mode=self.settings.scan_mode,
+            mode=self._mode_label(),
             min_confidence=self.settings.min_confidence,
             total_market=total_all,
             scan_target=total,
@@ -214,8 +217,9 @@ class MarketScanner:
         self._status(
             f"🔎 Spot scan started\n"
             f"Analyzing: {total} of {total_all} USDT pairs\n"
-            f"Mode: {self.settings.scan_mode}\n"
-            f"Account: {self.settings.account_balance_usdt:.0f} USDT | TP3 aim ≈{self.settings.target_upside_pct:.0f}%\n"
+            f"Mode: {self._mode_label()}\n"
+            f"Account: {self.settings.account_balance_usdt:.0f} USDT | "
+            f"TP3 aim ≈{self.settings.effective_target_upside_pct():.0f}%\n"
             f"Min confidence: {self.settings.min_confidence}%\n"
             f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
         )
@@ -314,7 +318,7 @@ class MarketScanner:
             self.settings.account_balance_usdt,
             self.settings.effective_target_upside_pct(),
         )
-        RUNTIME.update(mode=f"{self.settings.scan_mode}/{self.settings.setup_mode}")
+        RUNTIME.update(mode=self._mode_label())
         if not self.telegram.enabled:
             logger.warning("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing — alerts print to console")
         else:
