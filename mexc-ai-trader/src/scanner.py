@@ -123,7 +123,6 @@ class MarketScanner:
             if isinstance(t, dict) and t.get("symbol"):
                 ticker_cache[normalize_spot_symbol(str(t["symbol"]))] = t
 
-        # Rank every USDT pair by 24h quote volume (liquidity), then move strength
         ranked: list[tuple[float, float, str]] = []
         for symbol in all_symbols:
             t = ticker_cache.get(symbol, {})
@@ -134,16 +133,43 @@ class MarketScanner:
                 move = 0.0
             ranked.append((turnover, move, symbol))
 
-        ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
         top_n = self.settings.scan_top_n if self.settings.scan_top_n > 0 else len(ranked)
         min_turn = self.settings.min_turnover_usdt
 
-        # Prefer pairs above turnover floor, but ALWAYS fill up to top_n by liquidity
+        # Cryptobull/breakout mode: hunt upside expanders first
+        if self.settings.setup_mode == "breakout" and self.settings.prefer_movers:
+            movers: list[tuple[float, float, str]] = []
+            for symbol in all_symbols:
+                t = ticker_cache.get(symbol, {})
+                turnover = float(t.get("quoteVolume") or t.get("amount24") or 0)
+                try:
+                    raw_chg = float(t.get("priceChangePercent") or 0)
+                except (TypeError, ValueError):
+                    raw_chg = 0.0
+                if raw_chg >= self.settings.min_mover_pct and (min_turn <= 0 or turnover >= min_turn):
+                    movers.append((raw_chg, turnover, symbol))
+            movers.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            if movers:
+                symbols = [s for _, _, s in movers[:top_n]]
+                if len(symbols) < top_n:
+                    ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                    for _, _, s in ranked:
+                        if s not in symbols:
+                            symbols.append(s)
+                        if len(symbols) >= top_n:
+                            break
+                logger.info(
+                    "Breakout mode: %d upside movers (>=%.1f%%) prioritized",
+                    min(len(movers), top_n),
+                    self.settings.min_mover_pct,
+                )
+                return symbols, ticker_cache, total
+
+        ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
         liquid = [s for turn, _, s in ranked if min_turn <= 0 or turn >= min_turn]
         if len(liquid) >= top_n:
             symbols = liquid[:top_n]
         else:
-            # Not enough pairs met the floor — take the most liquid top_n overall
             symbols = [s for _, _, s in ranked[:top_n]]
             logger.info(
                 "Only %d pairs met turnover>=%.0f USDT; scanning top %d by liquidity instead",
@@ -280,12 +306,15 @@ class MarketScanner:
 
     def run_forever(self) -> None:
         logger.info(
-            "Starting 24/7 SPOT scanner | interval=%ss | min_confidence=%s | mode=%s | balance=%.0f",
+            "Starting 24/7 SPOT scanner | interval=%ss | min_confidence=%s | mode=%s | setup=%s | balance=%.0f | TP3≈%.0f%%",
             self.settings.scan_interval_seconds,
             self.settings.min_confidence,
             self.settings.scan_mode,
+            self.settings.setup_mode,
             self.settings.account_balance_usdt,
+            self.settings.effective_target_upside_pct(),
         )
+        RUNTIME.update(mode=f"{self.settings.scan_mode}/{self.settings.setup_mode}")
         if not self.telegram.enabled:
             logger.warning("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing — alerts print to console")
         else:

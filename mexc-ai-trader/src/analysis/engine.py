@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 
 from config import Settings
+from src.analysis.breakout import analyze_breakout_setup
 from src.analysis.fundamentals import analyze_fundamentals
 from src.analysis.momentum import analyze_momentum
 from src.analysis.price_action import analyze_price_action
@@ -33,6 +34,20 @@ WEIGHTS = {
     "Spot Metrics": 0.05,
     "Fundamental Analysis": 0.05,
 }
+
+# Cryptobull-style: emphasize breakout structure + volume + momentum
+BREAKOUT_WEIGHTS = {
+    "Breakout Setup": 0.30,
+    "Volume": 0.20,
+    "Momentum": 0.15,
+    "Trend": 0.10,
+    "Price Action": 0.10,
+    "Smart Money Concepts": 0.05,
+    "Spot Metrics": 0.05,
+    "Fundamental Analysis": 0.05,
+}
+
+BREAKOUT_KEY_FACTORS = ("Breakout Setup", "Volume", "Momentum")
 
 
 def _combine_direction(factors: list[FactorResult]) -> Direction:
@@ -62,19 +77,34 @@ def _weighted_confidence(factors: list[FactorResult], direction: Direction) -> f
 
 def _verdict(direction: Direction, confidence: float, min_confidence: float = 70.0) -> Verdict:
     if direction == Direction.NONE or confidence < min_confidence:
-        return Verdict.NO_TRADE if confidence < 70 else Verdict.WAIT
+        return Verdict.NO_TRADE if confidence < min_confidence else Verdict.WAIT
     if direction == Direction.LONG:
         return Verdict.STRONG_BUY if confidence >= 92 else Verdict.BUY
     return Verdict.STRONG_SELL if confidence >= 92 else Verdict.SELL
 
 
-def _holding_time(tf_primary: str = "Min15") -> str:
+def _holding_time(tf_primary: str = "Min15", setup_mode: str = "standard") -> str:
+    if setup_mode == "breakout":
+        return "2d – 14d (spot breakout swing / Cryptobull-style)"
     return {
         "Min15": "30m – 6h (scalp/intraday spot)",
         "Min60": "2h – 24h (intraday/swing spot)",
         "Hour4": "12h – 5d (swing spot)",
         "Day1": "3d – 3w (position spot)",
     }.get(tf_primary, "2h – 24h spot")
+
+
+def _pick_level_frame(frames: dict[str, pd.DataFrame], setup_mode: str) -> pd.DataFrame | None:
+    if setup_mode == "breakout":
+        for key in ("Day1", "Hour4", "Min15", "Min60"):
+            df = frames.get(key)
+            if df is not None and not getattr(df, "empty", True) and len(df) >= 30:
+                return df
+    for key in ("Min15", "Min60", "Hour4", "Day1"):
+        df = frames.get(key)
+        if df is not None and not getattr(df, "empty", True) and len(df) >= 30:
+            return df
+    return None
 
 
 def analyze_symbol(
@@ -87,9 +117,10 @@ def analyze_symbol(
     btc_df: pd.DataFrame | None = None,
     depth: dict[str, Any] | None = None,
 ) -> SignalReport:
-    primary = frames.get("Min15")
-    if primary is None or getattr(primary, "empty", False):
-        primary = frames.get("Min60")
+    setup_mode = getattr(settings, "setup_mode", "standard")
+    primary = _pick_level_frame(frames, setup_mode)
+    breakout_factor = analyze_breakout_setup(frames) if setup_mode == "breakout" else None
+
     factors: list[FactorResult] = [
         analyze_trend(frames),
         analyze_momentum(primary, adx_min=settings.adx_min),
@@ -99,19 +130,29 @@ def analyze_symbol(
         analyze_spot_metrics(ticker, trades=deals, depth=depth),
         fundamentals_cache or analyze_fundamentals(settings.newsapi_key, symbol=symbol),
     ]
+    if breakout_factor is not None:
+        factors.insert(0, breakout_factor)
 
+    weights = BREAKOUT_WEIGHTS if setup_mode == "breakout" else WEIGHTS
+    key_factors = BREAKOUT_KEY_FACTORS if setup_mode == "breakout" else KEY_FACTORS
     for f in factors:
-        f.weight = WEIGHTS.get(f.name, f.weight)
+        f.weight = weights.get(f.name, f.weight)
 
     direction = _combine_direction(factors)
+    # Breakout mode is spot-long biased (2x-style upside hunts)
+    if setup_mode == "breakout" and breakout_factor and breakout_factor.aligned:
+        direction = Direction.LONG
+
     confidence = (
         _weighted_confidence(factors, direction)
         if direction != Direction.NONE
         else _weighted_confidence(factors, Direction.LONG)
     )
+    if setup_mode == "breakout" and breakout_factor and breakout_factor.aligned:
+        confidence = round(min(99.0, max(confidence, breakout_factor.score * 0.85 + confidence * 0.15)), 2)
 
-    aligned_keys = [f.name for f in factors if f.name in KEY_FACTORS and f.aligned]
-    missing = [name for name in KEY_FACTORS if name not in aligned_keys]
+    aligned_keys = [f.name for f in factors if f.name in key_factors and f.aligned]
+    missing = [name for name in key_factors if name not in aligned_keys]
     why: list[str] = []
     for f in factors:
         if f.direction == direction and f.aligned:
@@ -124,38 +165,60 @@ def analyze_symbol(
     trend = next(f for f in factors if f.name == "Trend")
     spot = next(f for f in factors if f.name == "Spot Metrics")
     fund = next(f for f in factors if f.name == "Fundamental Analysis")
+    pa = next(f for f in factors if f.name == "Price Action")
 
-    if "conflicting higher-timeframe" in " ".join(trend.details).lower():
-        reject_reasons.append("Conflicting higher-timeframe trends")
-    if any("LOW LIQUIDITY" in d for d in spot.details) and not any(
-        "Breakout" in d or "Breakdown" in d for d in next(f for f in factors if f.name == "Price Action").details
-    ):
+    # In breakout mode, HTF conflict is softer if Daily/4H breakout is confirmed
+    if setup_mode != "breakout":
+        if "conflicting higher-timeframe" in " ".join(trend.details).lower():
+            reject_reasons.append("Conflicting higher-timeframe trends")
+    elif breakout_factor and not breakout_factor.aligned:
+        reject_reasons.append("No confirmed descending-channel / wedge breakout yet")
+
+    breakout_words = ("Breakout", "Breakdown", "CRYPTOBULL", "trendline", "wedge", "channel")
+    has_break = any(any(w in d for w in breakout_words) for d in (pa.details + (breakout_factor.details if breakout_factor else [])))
+    if any("LOW LIQUIDITY" in d for d in spot.details) and not has_break:
         reject_reasons.append("Low liquidity without clear breakout")
     if not fund.aligned and any("blackout" in d.lower() or "wait" in d.lower() for d in fund.details):
         reject_reasons.append("Major news / macro window within 30–60 minutes")
 
     min_aligned = getattr(settings, "min_aligned_factors", 2)
+    if setup_mode == "breakout":
+        min_aligned = min(min_aligned, 2)
     if len(aligned_keys) < min_aligned:
         reject_reasons.append(
-            f"Only {len(aligned_keys)}/{len(KEY_FACTORS)} key factors aligned (need {min_aligned})"
+            f"Only {len(aligned_keys)}/{len(key_factors)} key factors aligned (need {min_aligned})"
         )
 
+    # Quality filters: in breakout mode, require volume but relax BTC chop gate
     if getattr(settings, "quality_filters", True):
         btc_vol = btc_atr_pct(btc_df)
-        q_rejects = apply_quality_filters(
-            primary=primary,
-            fund_details=fund.details,
-            btc_volatility_pct=btc_vol,
-            max_btc_volatility_pct=settings.max_btc_volatility_pct,
-            require_volume_above_avg=settings.require_volume_above_avg,
-        )
+        if setup_mode == "breakout":
+            q_rejects = apply_quality_filters(
+                primary=primary,
+                fund_details=fund.details,
+                btc_volatility_pct=btc_vol if btc_vol is not None else 0.0,
+                max_btc_volatility_pct=max(settings.max_btc_volatility_pct, 2.5),
+                require_volume_above_avg=True,
+            )
+            # Don't hard-fail breakouts solely because BTC ATR missing
+            q_rejects = [r for r in q_rejects if "BTC volatility unavailable" not in r]
+        else:
+            q_rejects = apply_quality_filters(
+                primary=primary,
+                fund_details=fund.details,
+                btc_volatility_pct=btc_vol,
+                max_btc_volatility_pct=settings.max_btc_volatility_pct,
+                require_volume_above_avg=settings.require_volume_above_avg,
+            )
         reject_reasons.extend(q_rejects)
         if btc_vol is not None:
-            why.append(f"BTC ATR%={btc_vol:.2f} (max {settings.max_btc_volatility_pct:.2f})")
+            why.append(f"BTC ATR%={btc_vol:.2f}")
 
     if direction == Direction.NONE:
         reject_reasons.append("No clear directional alignment across factors")
 
+    target_upside = settings.effective_target_upside_pct()
+    max_stop = settings.effective_max_stop_pct()
     levels = None
     if direction in (Direction.LONG, Direction.SHORT) and primary is not None:
         levels = build_trade_levels(
@@ -165,8 +228,8 @@ def analyze_symbol(
             risk_pct=settings.risk_pct,
             min_rr=settings.min_rr,
             preferred_rr=settings.preferred_rr,
-            target_upside_pct=settings.target_upside_pct,
-            max_stop_pct=settings.max_stop_pct,
+            target_upside_pct=target_upside,
+            max_stop_pct=max_stop,
         )
         if levels is None:
             reject_reasons.append("Risk:Reward < 1:2.5 or stop beyond acceptable risk")
@@ -186,45 +249,51 @@ def analyze_symbol(
             invalidation=["N/A — no active trade"],
             major_risks=reject_reasons,
             factor_scores=factor_scores,
-            trade_style="SPOT",
+            trade_style="SPOT_BREAKOUT" if setup_mode == "breakout" else "SPOT",
             raw={"factors": {f.name: f.details for f in factors}, "missing": missing},
         )
 
     invalidation = [
         f"Close beyond stop-loss at {levels.stop_loss}",
-        "HTF EMA structure flips against trade",
-        "Volume dries up and price re-enters prior range",
+        "Price falls back inside the broken channel/wedge",
+        "Volume dries up and breakout fails (fakeout)",
     ]
     risks = [
-        "Spot gap / sudden dump (no futures liquidation cascade, but thin books still slip)",
-        "Unexpected macro headline",
-        "Exchange outage or thin book slippage",
-        f"Account is {settings.account_balance_usdt:.0f} USDT — size carefully; TP3 ~{settings.target_upside_pct:.0f}% is ambitious on majors",
+        "Altcoin breakouts can wick hard both ways — use the stop",
+        "2x-style targets are not guaranteed; scale out at TP1/TP2",
+        "Unexpected macro headline / BTC dump can invalidate alts",
+        f"Account {settings.account_balance_usdt:.0f} USDT | TP3 aim ≈{target_upside:.0f}%",
     ]
-    verdict = _verdict(direction, confidence, min_confidence=settings.min_confidence)
+    if breakout_factor and breakout_factor.aligned:
+        why = [
+            f"CRYPTOBULL-STYLE: {next((d for d in breakout_factor.details if 'Structure:' in d), 'channel/wedge breakout')}",
+            *why[:6],
+        ]
 
+    verdict = _verdict(direction, confidence, min_confidence=settings.min_confidence)
     return SignalReport(
         symbol=symbol,
         direction=direction,
         confidence=confidence,
         verdict=verdict,
-        message="SPOT TRADE SETUP VALID",
+        message="SPOT BREAKOUT SETUP VALID" if setup_mode == "breakout" else "SPOT TRADE SETUP VALID",
         why_valid=why or ["Multi-factor confluence ≥ threshold"],
         higher_tf_trend=htf,
         levels=levels,
-        estimated_holding_time=_holding_time("Min15"),
+        estimated_holding_time=_holding_time("Day1", setup_mode=setup_mode),
         invalidation=invalidation,
         major_risks=risks,
         factor_scores=factor_scores,
-        trade_style="SPOT",
+        trade_style="SPOT_BREAKOUT" if setup_mode == "breakout" else "SPOT",
         raw={"factors": {f.name: f.details for f in factors}},
     )
 
 
 def format_report(report: SignalReport) -> str:
     shown = display_symbol(report.symbol)
+    style = "BREAKOUT SWING" if report.trade_style == "SPOT_BREAKOUT" else "SPOT"
     lines = [
-        f"📊 MEXC SPOT Signal — {shown}",
+        f"📊 MEXC {style} Signal — {shown}",
         f"Verdict: {report.verdict.value}",
         f"Trade direction (spot): {report.spot_side_label()}",
         f"Confidence: {report.confidence:.1f}%",

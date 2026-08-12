@@ -87,6 +87,15 @@ class Settings:
     # Spot growth target: TP3 aims near this % price move (default 50% on a 50 USDT book)
     target_upside_pct: float = field(default_factory=lambda: _env_float("TARGET_UPSIDE_PCT", 50.0))
     max_stop_pct: float = field(default_factory=lambda: _env_float("MAX_STOP_PCT", 0.08))
+    # standard = multi-factor scalp/swing | breakout = Cryptobull-style channel/wedge breakouts
+    setup_mode: str = field(
+        default_factory=lambda: os.getenv("SETUP_MODE", "breakout").strip().lower() or "breakout"
+    )
+    # In breakout mode, prefer coins already moving (24h abs % change)
+    prefer_movers: bool = field(
+        default_factory=lambda: os.getenv("PREFER_MOVERS", "true").strip().lower() in {"1", "true", "yes"}
+    )
+    min_mover_pct: float = field(default_factory=lambda: _env_float("MIN_MOVER_PCT", 5.0))
     risk_pct: float = 0.01
     min_rr: float = 2.5
     preferred_rr: float = 3.0
@@ -97,9 +106,25 @@ class Settings:
     timeframes: tuple[str, ...] = ("Min15", "Min60", "Hour4", "Day1")
 
     def active_timeframes(self) -> tuple[str, ...]:
-        if self.scan_mode == "full":
+        mode = self.scan_mode
+        if self.setup_mode == "breakout":
+            # HTF structure first for Cryptobull-style swings
+            if mode == "full":
+                return self.timeframes
+            return ("Hour4", "Day1", "Min15")
+        if mode == "full":
             return self.timeframes
         return ("Min15", "Hour4", "Day1")
+
+    def effective_target_upside_pct(self) -> float:
+        if self.setup_mode == "breakout" and self.target_upside_pct <= 50:
+            return 100.0  # aim for 2x-style stretch targets on breakout swings
+        return self.target_upside_pct
+
+    def effective_max_stop_pct(self) -> float:
+        if self.setup_mode == "breakout" and self.max_stop_pct <= 0.08:
+            return 0.15  # alts need more room on daily breakouts
+        return self.max_stop_pct
 
     def telegram_ready(self) -> bool:
         return bool(self.telegram_bot_token and self.telegram_chat_id)

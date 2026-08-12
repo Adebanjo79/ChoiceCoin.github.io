@@ -142,3 +142,56 @@ def test_engine_no_trade_on_thin_conflict():
     assert report.verdict in (Verdict.NO_TRADE, Verdict.WAIT)
     assert NO_TRADE_MSG in report.message or report.direction == Direction.NONE
     assert "SPOT" in format_report(report) or "Spot" in format_report(report) or "spot" in format_report(report).lower()
+
+
+def _synthetic_descending_breakout(n: int = 80) -> pd.DataFrame:
+    """Build a descending channel then a strong upside breakout candle."""
+    rng = np.random.default_rng(3)
+    # Falling channel
+    highs = np.linspace(120, 90, n - 1) + rng.normal(0, 0.3, n - 1)
+    lows = np.linspace(100, 80, n - 1) + rng.normal(0, 0.3, n - 1)
+    closes = (highs + lows) / 2
+    opens = closes + rng.normal(0, 0.2, n - 1)
+    vols = rng.uniform(800, 1200, n - 1)
+    # Breakout candle
+    last_open = closes[-1]
+    last_close = last_open * 1.12
+    last_high = last_close * 1.02
+    last_low = last_open * 0.99
+    open_ = np.append(opens, last_open)
+    high = np.append(highs, last_high)
+    low = np.append(lows, last_low)
+    close = np.append(closes, last_close)
+    volume = np.append(vols, float(vols[-20:].mean()) * 2.5)
+    return pd.DataFrame(
+        {
+            "time": np.arange(n),
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        }
+    )
+
+
+def test_breakout_detector_finds_channel_break():
+    from src.analysis.breakout import detect_channel_breakout
+
+    df = _synthetic_descending_breakout()
+    setup = detect_channel_breakout(df, lookback=80)
+    assert setup.direction in (Direction.LONG, Direction.NONE)
+    assert setup.score > 40
+    assert setup.volume_spike >= 1.0
+
+
+def test_breakout_mode_target_defaults():
+    settings = Settings(
+        telegram_bot_token="",
+        telegram_chat_id="",
+        setup_mode="breakout",
+        target_upside_pct=50,
+        max_stop_pct=0.08,
+    )
+    assert settings.effective_target_upside_pct() == 100.0
+    assert settings.effective_max_stop_pct() == 0.15
