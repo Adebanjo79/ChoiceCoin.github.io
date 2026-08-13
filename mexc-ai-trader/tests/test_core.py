@@ -13,7 +13,7 @@ from src.analysis.spot_metrics import analyze_spot_metrics
 from src.analysis.trend import analyze_trend
 from src.indicators.technical import ema, rsi
 from src.mexc_client import display_symbol, normalize_spot_symbol
-from src.models import Direction, NO_TRADE_MSG, Verdict
+from src.models import Direction, NO_TRADE_MSG, SignalReport, Verdict
 from src.risk import build_trade_levels
 
 
@@ -196,6 +196,31 @@ def test_breakout_mode_target_defaults():
     )
     assert settings.effective_target_upside_pct() == 800.0
     assert settings.effective_max_stop_pct() >= 0.12
+
+
+def test_daily_strong_buy_promote_floors_confidence():
+    from src.scanner import MarketScanner
+    from src.models import TradeLevels
+
+    settings = Settings(
+        telegram_bot_token="",
+        telegram_chat_id="",
+        min_confidence=80,
+        daily_signal_target=3,
+        force_strong_buy=True,
+    )
+    scanner = MarketScanner(settings)
+    report = SignalReport(
+        symbol="TESTUSDT",
+        direction=Direction.LONG,
+        confidence=72.0,
+        verdict=Verdict.WAIT,
+        message=NO_TRADE_MSG,
+        levels=TradeLevels(1, 0.9, 1.5, 3, 9, 2.5, 1, 0.5, 50, 800),
+    )
+    out = scanner._promote_to_strong_buy(report, 1)
+    assert out.verdict == Verdict.STRONG_BUY
+    assert out.confidence >= 80
 
 
 def test_moonshot_levels_50_to_800():

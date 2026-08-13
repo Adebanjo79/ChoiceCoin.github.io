@@ -12,7 +12,7 @@ from config import Settings
 from src.analysis.engine import analyze_symbol, format_report
 from src.analysis.fundamentals import analyze_fundamentals
 from src.mexc_client import MexcSpotClient, normalize_spot_symbol
-from src.models import SignalReport
+from src.models import Direction, SignalReport, Verdict
 from src.runtime_status import RUNTIME
 from src.telegram_alerter import TelegramAlerter
 
@@ -30,6 +30,9 @@ class MarketScanner:
         self._last_alerted: dict[str, float] = {}
         self._alert_cooldown_sec = 15 * 60  # 15m so strong breakouts can re-alert faster
         self._cycle = 0
+        self._signals_today = 0
+        self._signal_day = ""
+        self._alerted_symbols_today: set[str] = set()
         RUNTIME.update(
             mode=self._mode_label(),
             min_confidence=settings.min_confidence,
@@ -38,6 +41,24 @@ class MarketScanner:
 
     def _mode_label(self) -> str:
         return f"{self.settings.scan_mode}/{self.settings.setup_mode}"
+
+    def _roll_daily_counter(self) -> None:
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if day != self._signal_day:
+            self._signal_day = day
+            self._signals_today = 0
+            self._alerted_symbols_today = set()
+            logger.info("New UTC day %s — daily STRONG BUY quota reset to 0/%s", day, self.settings.daily_signal_target)
+
+    def _record_alert(self, report: SignalReport) -> None:
+        self._roll_daily_counter()
+        self._signals_today += 1
+        self._alerted_symbols_today.add(report.symbol)
+        RUNTIME.update(
+            signals_today=self._signals_today,
+            daily_signal_target=self.settings.daily_signal_target,
+            last_signal=f"{report.symbol} {report.verdict.value} {report.confidence:.1f}%",
+        )
 
     def _status(self, text: str) -> None:
         if self.settings.telegram_status and self.telegram.enabled:
@@ -106,13 +127,70 @@ class MarketScanner:
     def _should_alert(self, report: SignalReport) -> bool:
         if not report.is_actionable():
             return False
+        if report.confidence < self.settings.min_confidence:
+            return False
         key = f"{report.symbol}:{report.direction.value}"
         now = time.time()
         last = self._last_alerted.get(key, 0)
         if now - last < self._alert_cooldown_sec:
             return False
+        if report.symbol in self._alerted_symbols_today:
+            return False
         self._last_alerted[key] = now
         return True
+
+    def _promote_to_strong_buy(self, report: SignalReport, slot: int) -> SignalReport:
+        """Force daily quota picks to STRONG BUY with moonshot levels already attached."""
+        report.verdict = Verdict.STRONG_BUY
+        report.direction = Direction.LONG
+        report.message = "SPOT BREAKOUT SETUP VALID"
+        note = f"DAILY STRONG BUY #{slot}/{self.settings.daily_signal_target} (best available today)"
+        report.why_valid = [note, *list(report.why_valid)[:6]]
+        # Show at least min confidence on forced daily picks so they read as 80%+
+        if report.confidence < self.settings.min_confidence:
+            report.confidence = round(self.settings.min_confidence, 2)
+            report.why_valid.append(
+                f"Confidence floored to {self.settings.min_confidence:.0f}% for daily STRONG BUY quota"
+            )
+        return report
+
+    def _fill_daily_strong_buys(self, results: list[SignalReport]) -> int:
+        """Ensure up to DAILY_SIGNAL_TARGET STRONG BUY alerts are sent each UTC day."""
+        self._roll_daily_counter()
+        target = max(0, int(self.settings.daily_signal_target))
+        if target <= 0 or self._signals_today >= target:
+            return 0
+
+        # Prefer actionable high-confidence first, then WAIT candidates that still have levels
+        pool = [
+            r
+            for r in results
+            if r.levels is not None
+            and r.symbol not in self._alerted_symbols_today
+            and r.direction in {Direction.LONG, Direction.NONE}
+        ]
+        pool.sort(key=lambda r: r.confidence, reverse=True)
+
+        sent = 0
+        for report in pool:
+            if self._signals_today >= target:
+                break
+            slot = self._signals_today + 1
+            promoted = self._promote_to_strong_buy(report, slot)
+            key = f"{promoted.symbol}:{Direction.LONG.value}"
+            self._last_alerted[key] = time.time()
+            self._record_alert(promoted)
+            text = format_report(promoted)
+            logger.info(
+                "DAILY QUOTA ALERT %s STRONG BUY conf=%.1f (%d/%d)",
+                promoted.symbol,
+                promoted.confidence,
+                self._signals_today,
+                target,
+            )
+            self.telegram.send(text)
+            sent += 1
+        return sent
 
     def _select_symbols(self) -> tuple[list[str], dict[str, dict[str, Any]], int]:
         """Return symbols to analyze, ticker cache, and total spot pair count."""
@@ -188,18 +266,20 @@ class MarketScanner:
         return symbols, ticker_cache, total
 
     def run_scan(self) -> list[SignalReport]:
+        self._roll_daily_counter()
         symbols, ticker_cache, total_all = self._select_symbols()
         total = len(symbols)
         tfs = ", ".join(self.settings.active_timeframes())
         logger.info(
-            "Scanning %d/%d spot pairs | mode=%s | tfs=%s | workers=%s | account=%.0f USDT | target upside=%.0f%%",
+            "Scanning %d/%d spot pairs | mode=%s | setup=%s | tfs=%s | daily STRONG BUY %d/%d | conf>=%.0f",
             total,
             total_all,
             self.settings.scan_mode,
+            self.settings.setup_mode,
             tfs,
-            self.settings.max_workers,
-            self.settings.account_balance_usdt,
-            self.settings.target_upside_pct,
+            self._signals_today,
+            self.settings.daily_signal_target,
+            self.settings.min_confidence,
         )
         RUNTIME.update(
             phase="scanning",
@@ -210,6 +290,8 @@ class MarketScanner:
             scan_target=total,
             done=0,
             signals_this_cycle=0,
+            signals_today=self._signals_today,
+            daily_signal_target=self.settings.daily_signal_target,
             cycle_started_at=time.time(),
             waiting_until=0.0,
             last_error="",
@@ -256,11 +338,11 @@ class MarketScanner:
                     continue
                 results.append(report)
                 if self._should_alert(report):
+                    if self.settings.force_strong_buy:
+                        report = self._promote_to_strong_buy(report, self._signals_today + 1)
                     actionable += 1
-                    RUNTIME.update(
-                        signals_this_cycle=actionable,
-                        last_signal=f"{report.symbol} {report.verdict.value} {report.confidence:.1f}%",
-                    )
+                    self._record_alert(report)
+                    RUNTIME.update(signals_this_cycle=actionable)
                     text = format_report(report)
                     logger.info(
                         "ALERT %s %s conf=%.1f",
@@ -312,12 +394,19 @@ class MarketScanner:
             closest_why=top_why,
             done=total,
             signals_this_cycle=actionable,
+            signals_today=self._signals_today,
+            daily_signal_target=self.settings.daily_signal_target,
         )
+
+        # Always try to complete the daily STRONG BUY quota (default 3/day)
+        quota_sent = self._fill_daily_strong_buys(results)
+        actionable += quota_sent
 
         self._status(
             f"✅ Spot scan finished\n"
             f"Checked: {len(results)}/{total}\n"
-            f"Signals sent: {actionable}\n"
+            f"Signals this cycle: {actionable}\n"
+            f"STRONG BUY today: {self._signals_today}/{self.settings.daily_signal_target}\n"
             f"Closest (not enough yet):\n" + "\n".join(f"• {x}" for x in near_lines)
         )
         return results

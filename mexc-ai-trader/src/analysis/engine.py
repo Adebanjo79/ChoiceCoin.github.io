@@ -123,7 +123,8 @@ def analyze_symbol(
 
     # ------------------------------------------------------------------
     # AGGRESSIVE BREAKOUT PATH: no institutional hard-blocks
-    # Fire immediately when breakout score clears threshold.
+    # Immediate STRONG BUY when confidence >= MIN_CONFIDENCE (default 80).
+    # Lower-scoring breakouts keep levels as WAIT candidates for daily top-3.
     # TP ladder: TP1=50%, TP2=200%, TP3=800% (configurable).
     # ------------------------------------------------------------------
     if (
@@ -160,17 +161,29 @@ def analyze_symbol(
                 factor_scores={"Breakout Setup": breakout_factor.score},
                 trade_style="SPOT_BREAKOUT",
             )
-        verdict = (
-            Verdict.STRONG_BUY
-            if confidence >= 80
-            else Verdict.BUY
-        )
+
+        min_conf = settings.min_confidence
+        force_sb = getattr(settings, "force_strong_buy", True)
+        if confidence >= min_conf:
+            verdict = Verdict.STRONG_BUY if force_sb or confidence >= 80 else Verdict.BUY
+            direction = Direction.LONG
+            message = "SPOT BREAKOUT SETUP VALID"
+        else:
+            # Keep levels so daily quota can promote top picks to STRONG BUY
+            verdict = Verdict.WAIT
+            direction = Direction.LONG
+            message = NO_TRADE_MSG
+            why = [
+                f"Breakout candidate below {min_conf:.0f}% (score {confidence:.1f}%) — eligible for daily top-3",
+                *why,
+            ]
+
         return SignalReport(
             symbol=symbol,
-            direction=Direction.LONG,
+            direction=direction,
             confidence=confidence,
             verdict=verdict,
-            message="SPOT BREAKOUT SETUP VALID",
+            message=message,
             why_valid=why,
             higher_tf_trend=higher_tf_summary(frames),
             levels=levels,
