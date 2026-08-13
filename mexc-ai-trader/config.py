@@ -117,13 +117,12 @@ class Settings:
         return ("Min15", "Hour4", "Day1")
 
     def effective_target_upside_pct(self) -> float:
-        if self.setup_mode == "breakout" and self.target_upside_pct <= 50:
-            return 100.0  # aim for 2x-style stretch targets on breakout swings
+        # Respect TARGET_UPSIDE_PCT (use 50 for ~50% Cryptobull-style targets)
         return self.target_upside_pct
 
     def effective_max_stop_pct(self) -> float:
         if self.setup_mode == "breakout" and self.max_stop_pct <= 0.08:
-            return 0.15  # alts need more room on daily breakouts
+            return 0.18  # alts need more room on daily breakouts
         return self.max_stop_pct
 
     def telegram_ready(self) -> bool:

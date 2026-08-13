@@ -279,9 +279,15 @@ class MarketScanner:
                     )
 
                 near = sorted(results, key=lambda r: r.confidence, reverse=True)[:3]
+                top_why = ""
+                if near:
+                    top = near[0]
+                    if not top.is_actionable() and top.why_valid:
+                        top_why = f"{top.symbol}: {top.why_valid[0]}"
                 RUNTIME.update(
                     signals_this_cycle=actionable,
                     closest=[f"{r.symbol}: {r.confidence:.1f}% ({r.verdict.value})" for r in near],
+                    closest_why=top_why,
                 )
 
                 if done % every == 0 or done == total:
@@ -298,7 +304,15 @@ class MarketScanner:
         near_lines = [
             f"{r.symbol}: {r.confidence:.1f}% ({r.verdict.value})" for r in near
         ] or ["none"]
-        RUNTIME.update(closest=near_lines, done=total, signals_this_cycle=actionable)
+        top_why = ""
+        if near and near[0].why_valid:
+            top_why = f"{near[0].symbol}: {near[0].why_valid[0]}"
+        RUNTIME.update(
+            closest=near_lines,
+            closest_why=top_why,
+            done=total,
+            signals_this_cycle=actionable,
+        )
 
         self._status(
             f"✅ Spot scan finished\n"

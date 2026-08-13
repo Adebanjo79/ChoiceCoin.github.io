@@ -17,6 +17,7 @@ def build_trade_levels(
     preferred_rr: float = 3.0,
     target_upside_pct: float = 50.0,
     max_stop_pct: float = 0.08,
+    clamp_stop: bool = False,
 ) -> TradeLevels | None:
     """
     Spot-focused levels.
@@ -66,13 +67,34 @@ def build_trade_levels(
     if rr < min_rr:
         return None
 
+    # Reject absurd stop as unacceptable risk distance — unless clamp_stop
+    if risk / entry > max_stop_pct:
+        if not clamp_stop:
+            return None
+        # Cap stop distance so alt breakouts can still alert with defined risk
+        if direction == Direction.LONG:
+            stop = entry * (1.0 - max_stop_pct)
+            risk = entry - stop
+            tp1 = entry + risk * 1.5
+            tp2 = entry + risk * preferred_rr
+            stretch = entry * (1.0 + max(target_upside_pct, 0.0) / 100.0)
+            tp3 = max(tp2, stretch)
+            rr = (tp2 - entry) / risk if risk else 0.0
+            upside_to_tp3 = (tp3 - entry) / entry * 100.0
+        else:
+            stop = entry * (1.0 + max_stop_pct)
+            risk = stop - entry
+            tp1 = entry - risk * 1.5
+            tp2 = entry - risk * preferred_rr
+            tp3 = entry - risk * max(preferred_rr, 4.0)
+            rr = (entry - tp2) / risk if risk else 0.0
+            upside_to_tp3 = (entry - tp3) / entry * 100.0
+        if risk <= 0 or rr < min_rr:
+            return None
+
     risk_amount = account_balance * risk_pct
     position_size = risk_amount / risk if risk else 0.0  # coin units
     position_notional = position_size * entry
-
-    # Reject absurd stop as unacceptable risk distance
-    if risk / entry > max_stop_pct:
-        return None
 
     # Cap notional at account balance for spot (no leverage)
     if position_notional > account_balance and entry > 0:

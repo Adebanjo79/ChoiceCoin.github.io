@@ -193,5 +193,24 @@ def test_breakout_mode_target_defaults():
         target_upside_pct=50,
         max_stop_pct=0.08,
     )
-    assert settings.effective_target_upside_pct() == 100.0
-    assert settings.effective_max_stop_pct() == 0.15
+    assert settings.effective_target_upside_pct() == 50.0
+    assert settings.effective_max_stop_pct() == 0.18
+
+
+def test_resistance_breakout_detector():
+    from src.analysis.breakout import detect_resistance_breakout
+
+    rng = np.random.default_rng(1)
+    n = 60
+    # Flat range then breakout
+    close = np.concatenate([np.full(n - 1, 100.0) + rng.normal(0, 0.3, n - 1), [112.0]])
+    high = np.concatenate([np.full(n - 1, 101.5), [114.0]])
+    low = np.concatenate([np.full(n - 1, 98.5), [100.5]])
+    open_ = np.concatenate([np.full(n - 1, 100.0), [101.0]])
+    vol = np.concatenate([rng.uniform(800, 1000, n - 1), [2500.0]])
+    df = pd.DataFrame(
+        {"time": np.arange(n), "open": open_, "high": high, "low": low, "close": close, "volume": vol}
+    )
+    setup = detect_resistance_breakout(df, lookback=60)
+    assert setup.score >= 50
+    assert setup.pattern == "horizontal resistance"

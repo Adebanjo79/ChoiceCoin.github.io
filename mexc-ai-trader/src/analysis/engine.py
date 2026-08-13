@@ -167,23 +167,29 @@ def analyze_symbol(
     fund = next(f for f in factors if f.name == "Fundamental Analysis")
     pa = next(f for f in factors if f.name == "Price Action")
 
-    # In breakout mode, HTF conflict is softer if Daily/4H breakout is confirmed
+    # In breakout mode, require a real breakout pattern (channel/wedge OR resistance)
     if setup_mode != "breakout":
         if "conflicting higher-timeframe" in " ".join(trend.details).lower():
             reject_reasons.append("Conflicting higher-timeframe trends")
     elif breakout_factor and not breakout_factor.aligned:
-        reject_reasons.append("No confirmed descending-channel / wedge breakout yet")
+        # Soft gate: only hard-reject if breakout score is also weak
+        if breakout_factor.score < 60:
+            reject_reasons.append("No confirmed channel/resistance breakout yet")
 
-    breakout_words = ("Breakout", "Breakdown", "CRYPTOBULL", "trendline", "wedge", "channel")
-    has_break = any(any(w in d for w in breakout_words) for d in (pa.details + (breakout_factor.details if breakout_factor else [])))
+    breakout_words = ("Breakout", "Breakdown", "CRYPTOBULL", "trendline", "wedge", "channel", "resistance")
+    has_break = any(
+        any(w.lower() in d.lower() for w in breakout_words)
+        for d in (pa.details + (breakout_factor.details if breakout_factor else []))
+    )
     if any("LOW LIQUIDITY" in d for d in spot.details) and not has_break:
         reject_reasons.append("Low liquidity without clear breakout")
-    if not fund.aligned and any("blackout" in d.lower() or "wait" in d.lower() for d in fund.details):
+    # News blackout still applies, but not soft "wait" wording alone in breakout mode
+    if any("blackout" in d.lower() for d in fund.details):
         reject_reasons.append("Major news / macro window within 30–60 minutes")
 
     min_aligned = getattr(settings, "min_aligned_factors", 2)
     if setup_mode == "breakout":
-        min_aligned = min(min_aligned, 2)
+        min_aligned = 1 if (breakout_factor and breakout_factor.aligned) else min(min_aligned, 2)
     if len(aligned_keys) < min_aligned:
         reject_reasons.append(
             f"Only {len(aligned_keys)}/{len(key_factors)} key factors aligned (need {min_aligned})"
@@ -193,15 +199,22 @@ def analyze_symbol(
     if getattr(settings, "quality_filters", True):
         btc_vol = btc_atr_pct(btc_df)
         if setup_mode == "breakout":
+            require_vol = True
+            # If breakout detector already saw volume expansion, don't double-punish
+            if breakout_factor and any("volume" in d.lower() and ("x1." in d.lower() or "x2." in d.lower() or "Strong volume" in d) for d in breakout_factor.details):
+                require_vol = False
             q_rejects = apply_quality_filters(
                 primary=primary,
                 fund_details=fund.details,
                 btc_volatility_pct=btc_vol if btc_vol is not None else 0.0,
                 max_btc_volatility_pct=max(settings.max_btc_volatility_pct, 2.5),
-                require_volume_above_avg=True,
+                require_volume_above_avg=require_vol,
             )
-            # Don't hard-fail breakouts solely because BTC ATR missing
-            q_rejects = [r for r in q_rejects if "BTC volatility unavailable" not in r]
+            q_rejects = [
+                r
+                for r in q_rejects
+                if "BTC volatility unavailable" not in r and "News/macro window" not in r
+            ]
         else:
             q_rejects = apply_quality_filters(
                 primary=primary,
@@ -226,13 +239,14 @@ def analyze_symbol(
             direction,
             account_balance=settings.account_balance_usdt,
             risk_pct=settings.risk_pct,
-            min_rr=settings.min_rr,
+            min_rr=settings.min_rr if setup_mode != "breakout" else min(settings.min_rr, 2.0),
             preferred_rr=settings.preferred_rr,
             target_upside_pct=target_upside,
             max_stop_pct=max_stop,
+            clamp_stop=(setup_mode == "breakout"),
         )
         if levels is None:
-            reject_reasons.append("Risk:Reward < 1:2.5 or stop beyond acceptable risk")
+            reject_reasons.append("Risk:Reward < minimum or stop beyond acceptable risk")
 
     if reject_reasons or confidence < settings.min_confidence or levels is None:
         verdict = Verdict.NO_TRADE if confidence < settings.min_confidence else Verdict.WAIT

@@ -176,25 +176,108 @@ def detect_channel_breakout(df: pd.DataFrame, lookback: int = 60) -> BreakoutSet
     )
 
 
+def detect_resistance_breakout(df: pd.DataFrame, lookback: int = 60) -> BreakoutSetup:
+    """
+    ESP-style setup: horizontal resistance / range high break with volume + impulse.
+    """
+    details: list[str] = []
+    if df is None or len(df) < 35:
+        return BreakoutSetup(False, 0.0, Direction.NONE, ["Insufficient bars for resistance breakout"])
+
+    window = df.iloc[-lookback:].reset_index(drop=True)
+    prior = window.iloc[:-1]
+    resistance = float(prior["high"].tail(25).max())
+    support = float(prior["low"].tail(25).min())
+    price = float(window["close"].iloc[-1])
+    prev = float(window["close"].iloc[-2])
+    open_ = float(window["open"].iloc[-1])
+    high = float(window["high"].iloc[-1])
+    low = float(window["low"].iloc[-1])
+
+    # Compression: range not exploding for most of lookback
+    mid = prior.tail(20)
+    range_pct = (float(mid["high"].max()) - float(mid["low"].min())) / max(price, 1e-12) * 100
+    compressed = range_pct <= 45.0  # alts can still be wide; keep permissive
+
+    vol = window["volume"]
+    vol_avg = float(vol.iloc[-21:-1].mean()) if len(vol) > 21 else float(vol.mean())
+    vol_now = float(vol.iloc[-1])
+    vol_spike = (vol_now / vol_avg) if vol_avg > 0 else 0.0
+    impulse_pct = ((price - open_) / open_ * 100.0) if open_ else 0.0
+    broke = prev <= resistance * 1.002 and price > resistance * 1.001 and price > open_
+
+    details.append(f"Range resistance≈{resistance:.6f} | support≈{support:.6f}")
+    details.append(f"Prior 20-bar range≈{range_pct:.1f}% ({'compressed' if compressed else 'wide'})")
+    details.append(f"Breakout volume x{vol_spike:.2f} | impulse {impulse_pct:.1f}%")
+
+    if not broke:
+        score = 40.0 if compressed else 25.0
+        return BreakoutSetup(
+            False,
+            score,
+            Direction.NONE,
+            details + ["Waiting for clean close above resistance"],
+            pattern="horizontal resistance",
+            breakout_level=resistance,
+            impulse_pct=impulse_pct,
+            volume_spike=vol_spike,
+        )
+
+    score = 58.0
+    details.append("Close broke above range / horizontal resistance")
+    if compressed:
+        score += 8
+        details.append("Breakout from consolidation range")
+    if vol_spike >= 1.5:
+        score += 14
+        details.append("Strong volume confirms breakout")
+    elif vol_spike >= 1.2:
+        score += 8
+    else:
+        score -= 6
+        details.append("Volume not expanded enough")
+    if impulse_pct >= 3.0:
+        score += 10
+        details.append("Strong bullish impulse candle")
+    close_pos = (price - low) / (high - low + 1e-12)
+    if close_pos < 0.45:
+        score -= 12
+        details.append("Weak close in candle — possible fakeout")
+
+    score = float(min(100.0, max(0.0, score)))
+    found = score >= 68 and vol_spike >= 1.15
+    return BreakoutSetup(
+        found=found,
+        score=score,
+        direction=Direction.LONG if found or score >= 60 else Direction.NONE,
+        details=details,
+        pattern="horizontal resistance",
+        breakout_level=resistance,
+        impulse_pct=impulse_pct,
+        volume_spike=vol_spike,
+    )
+
+
 def analyze_breakout_setup(frames: dict[str, pd.DataFrame]) -> FactorResult:
-    """Score Daily first, then 4H — prefer HTF Cryptobull-style swings."""
+    """Score Daily/4H for channel/wedge OR horizontal resistance breakouts."""
     day = frames.get("Day1")
     h4 = frames.get("Hour4")
     primary = frames.get("Min15")
 
     candidates: list[BreakoutSetup] = []
-    if day is not None and not getattr(day, "empty", True):
-        d = detect_channel_breakout(day, lookback=min(90, len(day)))
-        d.details = [f"[Daily] {x}" for x in d.details]
-        candidates.append(d)
-    if h4 is not None and not getattr(h4, "empty", True):
-        h = detect_channel_breakout(h4, lookback=min(80, len(h4)))
-        h.details = [f"[4H] {x}" for x in h.details]
-        candidates.append(h)
-    if not candidates and primary is not None:
-        p = detect_channel_breakout(primary, lookback=min(60, len(primary)))
-        p.details = [f"[15m] {x}" for x in p.details]
-        candidates.append(p)
+
+    def _add(df: pd.DataFrame | None, label: str, lookback: int) -> None:
+        if df is None or getattr(df, "empty", True):
+            return
+        for detector in (detect_channel_breakout, detect_resistance_breakout):
+            setup = detector(df, lookback=min(lookback, len(df)))
+            setup.details = [f"[{label}] {x}" for x in setup.details]
+            candidates.append(setup)
+
+    _add(day, "Daily", 90)
+    _add(h4, "4H", 80)
+    if not candidates:
+        _add(primary, "15m", 60)
 
     if not candidates:
         return FactorResult(
@@ -206,7 +289,7 @@ def analyze_breakout_setup(frames: dict[str, pd.DataFrame]) -> FactorResult:
             weight=0.20,
         )
 
-    best = max(candidates, key=lambda c: c.score)
+    best = max(candidates, key=lambda c: (c.found, c.score))
     details = list(best.details)
     if best.found:
         details.insert(0, f"CRYPTOBULL-STYLE SETUP: {best.pattern} breakout")
