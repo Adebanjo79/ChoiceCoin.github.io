@@ -204,6 +204,24 @@ Stop with **Ctrl + C**.
 
 **Laptop sleep = bot stops.** For real 24/7 → Part 5.
 
+## Step 15b. Ask for status on Telegram (manual)
+
+While `python main.py` is running:
+
+1. Open your bot chat in Telegram  
+2. Type:
+
+```text
+status
+```
+
+(or `/status`)
+
+3. Bot replies with live scan info (cycle, pairs checked, last signal, closest setups)
+
+Keep `TELEGRAM_STATUS=false` so it does **not** spam. You ask `status` only when you want an update.  
+Also works: `help`
+
 ---
 
 # PART 5 — 24/7 offline (PuTTY + VPS)
@@ -230,16 +248,39 @@ nano .env
 
 Put the same Telegram values + `ACCOUNT_BALANCE_USDT=50` + `TARGET_UPSIDE_PCT=50`.
 
-## Step 22. Run under tmux (survives closing PuTTY)
+## Step 22. Run under tmux (survives closing PuTTY / laptop off)
+
+Recommended (background start — safest):
 
 ```bash
-tmux new -s mexc-spot
-source .venv/bin/activate
-python main.py
+cd ~/ChoiceCoin.github.io/mexc-ai-trader
+git pull origin cursor/mexc-spot-ai-trading-assistant-840c
+bash scripts/vps_start.sh
+tmux ls
 ```
 
-Detach: `Ctrl+b` then `d`  
-Reattach: `tmux attach -t mexc-spot`
+Then close PuTTY. Laptop can be off.
+
+In Telegram type: `status`
+
+If you attach to watch logs:
+
+```bash
+tmux attach -t mexc-spot
+```
+
+Detach before closing PuTTY: `Ctrl+b` then `d`  
+(Do not press Ctrl+C unless you want to stop the bot.)
+
+If the bot dies after laptop off, reconnect and run `bash scripts/vps_start.sh` again.
+
+Optional auto-start on VPS reboot:
+
+```bash
+sudo cp scripts/mexc-spot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mexc-spot
+```
 
 ---
 

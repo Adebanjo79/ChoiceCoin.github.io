@@ -17,8 +17,11 @@ class RuntimeStatus:
     scan_target: int = 0
     done: int = 0
     signals_this_cycle: int = 0
+    signals_today: int = 0
+    daily_signal_target: int = 5
     last_symbol: str = ""
     closest: list[str] = field(default_factory=list)
+    closest_why: str = ""
     last_signal: str = "none yet"
     last_error: str = ""
     cycle_started_at: float = 0.0
@@ -43,8 +46,11 @@ class RuntimeStatus:
                 "scan_target": self.scan_target,
                 "done": self.done,
                 "signals_this_cycle": self.signals_this_cycle,
+                "signals_today": self.signals_today,
+                "daily_signal_target": self.daily_signal_target,
                 "last_symbol": self.last_symbol,
                 "closest": list(self.closest),
+                "closest_why": self.closest_why,
                 "last_signal": self.last_signal,
                 "last_error": self.last_error,
                 "cycle_started_at": self.cycle_started_at,
@@ -69,6 +75,7 @@ class RuntimeStatus:
 
         closest = s["closest"][:3] or ["none yet"]
         closest_txt = "\n".join(f"• {c}" for c in closest)
+        why = s.get("closest_why") or ""
 
         return (
             "📊 MEXC SPOT Bot STATUS\n"
@@ -79,12 +86,14 @@ class RuntimeStatus:
             f"Progress: {progress}\n"
             f"Spot market size: {s['total_market']} pairs\n"
             f"Signals this cycle: {s['signals_this_cycle']}\n"
+            f"ABOUT TO BREAKOUT today: {s['signals_today']}/{s['daily_signal_target']}\n"
             f"Last coin checked: {s['last_symbol'] or 'n/a'}\n"
             f"Last trade alert: {s['last_signal']}\n"
             f"Uptime: {uh}h {um}m {us}s\n"
             "Closest setups:\n"
             f"{closest_txt}\n"
-            "\nType status anytime for a live update."
+            + (f"Why top WAIT/NO TRADE: {why}\n" if why else "")
+            + "\nType status anytime for a live update."
         )
 
 

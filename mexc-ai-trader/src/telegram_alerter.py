@@ -1,8 +1,9 @@
-"""Telegram alert sender + on-demand command listener (status)."""
+"""Telegram alert sender + on-demand command listener (status / help)."""
 
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -12,11 +13,16 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+def _clean_secret(value: str) -> str:
+    """Strip spaces/quotes that break Telegram auth when pasted into .env."""
+    return (value or "").strip().strip('"').strip("'").strip()
+
+
 class TelegramAlerter:
     def __init__(self, bot_token: str, chat_id: str):
-        self.bot_token = bot_token
-        self.chat_id = str(chat_id).strip() if chat_id else ""
-        self.enabled = bool(bot_token and self.chat_id)
+        self.bot_token = _clean_secret(bot_token)
+        self.chat_id = _clean_secret(chat_id)
+        self.enabled = bool(self.bot_token and self.chat_id)
         self._offset = 0
         self._listener_started = False
         self._stop = threading.Event()
@@ -28,7 +34,6 @@ class TelegramAlerter:
             return False
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         modes: list[str | None] = [parse_mode, None] if parse_mode else [None]
-        # Avoid Markdown parse failures on status text
         for mode in modes:
             payload: dict = {"chat_id": self.chat_id, "text": text[:4000]}
             if mode:
@@ -43,7 +48,7 @@ class TelegramAlerter:
         return False
 
     def start_command_listener(self, status_fn: Callable[[], str]) -> None:
-        """Background thread: reply when user types status / help."""
+        """Background thread: reply when user types status / help in Telegram."""
         if not self.enabled or self._listener_started:
             return
         self._listener_started = True
@@ -54,11 +59,32 @@ class TelegramAlerter:
             daemon=True,
         )
         thread.start()
-        logger.info("Telegram command listener started (type 'status' in chat)")
+        logger.info("Telegram command listener started — type 'status' in Telegram anytime")
+
+    @staticmethod
+    def _is_status_request(text: str) -> bool:
+        t = text.lower().strip()
+        # Exact / short commands
+        first = t.split()[0].lstrip("/") if t else ""
+        if first in {"status", "stat", "s"}:
+            return True
+        # Natural asks: "status?", "check status", "bot status", etc.
+        if re.search(r"\bstatus\b", t):
+            return True
+        return False
+
+    @staticmethod
+    def _is_help_request(text: str) -> bool:
+        t = text.lower().strip()
+        first = t.split()[0].lstrip("/") if t else ""
+        return first in {"help", "start", "commands", "menu"}
+
+    def _same_chat(self, chat_id: str) -> bool:
+        return str(chat_id).strip() == self.chat_id
 
     def _poll_commands(self, status_fn: Callable[[], str]) -> None:
         url = f"https://api.telegram.org/bot{self.bot_token}/getUpdates"
-        # Skip old messages
+        # Skip old messages so we only answer new asks
         try:
             boot = requests.get(url, params={"timeout": 0}, timeout=15)
             if boot.ok:
@@ -83,17 +109,18 @@ class TelegramAlerter:
                     chat = message.get("chat") or {}
                     chat_id = str(chat.get("id", ""))
                     text = (message.get("text") or "").strip()
-                    if not text or chat_id != self.chat_id:
+                    if not text or not self._same_chat(chat_id):
                         continue
-                    cmd = text.lower().split()[0].lstrip("/")
-                    if cmd in {"status", "stat", "s"}:
+                    if self._is_status_request(text):
+                        logger.info("Telegram status requested by chat %s", chat_id)
                         self.send(status_fn())
-                    elif cmd in {"help", "start"}:
+                    elif self._is_help_request(text):
                         self.send(
-                            "Commands:\n"
-                            "• status — live scan status\n"
+                            "MEXC Spot bot commands:\n"
+                            "• status — live scan status (manual check anytime)\n"
                             "• help — this message\n\n"
-                            "Trade alerts are sent automatically when a setup is valid."
+                            "Trade alerts are sent automatically when a setup is valid.\n"
+                            "Keep TELEGRAM_STATUS=false to avoid scan spam."
                         )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Telegram listener loop error: %s", exc)

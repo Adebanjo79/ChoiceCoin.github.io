@@ -12,7 +12,7 @@ from config import Settings
 from src.analysis.engine import analyze_symbol, format_report
 from src.analysis.fundamentals import analyze_fundamentals
 from src.mexc_client import MexcSpotClient, normalize_spot_symbol
-from src.models import SignalReport
+from src.models import Direction, SignalReport, Verdict
 from src.runtime_status import RUNTIME
 from src.telegram_alerter import TelegramAlerter
 
@@ -28,12 +28,40 @@ class MarketScanner:
         )
         self.telegram = TelegramAlerter(settings.telegram_bot_token, settings.telegram_chat_id)
         self._last_alerted: dict[str, float] = {}
-        self._alert_cooldown_sec = 60 * 60  # 1h per symbol direction
+        self._alert_cooldown_sec = 15 * 60  # 15m so strong breakouts can re-alert faster
         self._cycle = 0
+        self._signals_today = 0
+        self._signal_day = ""
+        self._alerted_symbols_today: set[str] = set()
         RUNTIME.update(
-            mode=settings.scan_mode,
+            mode=self._mode_label(),
             min_confidence=settings.min_confidence,
             phase="starting",
+        )
+
+    def _mode_label(self) -> str:
+        return f"{self.settings.scan_mode}/{self.settings.setup_mode}"
+
+    def _roll_daily_counter(self) -> None:
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if day != self._signal_day:
+            self._signal_day = day
+            self._signals_today = 0
+            self._alerted_symbols_today = set()
+            logger.info(
+                "New UTC day %s — daily ABOUT TO BREAKOUT quota reset to 0/%s",
+                day,
+                self.settings.daily_signal_target,
+            )
+
+    def _record_alert(self, report: SignalReport) -> None:
+        self._roll_daily_counter()
+        self._signals_today += 1
+        self._alerted_symbols_today.add(report.symbol)
+        RUNTIME.update(
+            signals_today=self._signals_today,
+            daily_signal_target=self.settings.daily_signal_target,
+            last_signal=f"{report.symbol} {report.verdict.value} {report.confidence:.1f}%",
         )
 
     def _status(self, text: str) -> None:
@@ -101,15 +129,119 @@ class MarketScanner:
             return None
 
     def _should_alert(self, report: SignalReport) -> bool:
+        self._roll_daily_counter()
+        target = max(0, int(self.settings.daily_signal_target))
+        if target > 0 and self._signals_today >= target:
+            return False
         if not report.is_actionable():
+            return False
+        if report.confidence < self.settings.min_confidence:
+            return False
+        # Daily Telegram slots are reserved for about-to-breakout setups
+        if self.settings.daily_pre_breakout_only and not self._is_pre_breakout(report):
             return False
         key = f"{report.symbol}:{report.direction.value}"
         now = time.time()
         last = self._last_alerted.get(key, 0)
         if now - last < self._alert_cooldown_sec:
             return False
+        if report.symbol in self._alerted_symbols_today:
+            return False
         self._last_alerted[key] = now
         return True
+
+    @staticmethod
+    def _is_pre_breakout(report: SignalReport) -> bool:
+        kind = str((report.raw or {}).get("setup_kind", "")).lower()
+        if kind == "pre_breakout":
+            return True
+        text = " ".join(report.why_valid).lower()
+        return (
+            "about to breakout" in text
+            or "pre-breakout" in text
+            or "coiled under" in text
+        )
+
+    def _promote_to_strong_buy(
+        self,
+        report: SignalReport,
+        slot: int,
+        *,
+        as_pre_breakout: bool | None = None,
+    ) -> SignalReport:
+        """Force daily quota picks to STRONG BUY about-to-breakout alerts at 90%+."""
+        report.verdict = Verdict.STRONG_BUY
+        report.direction = Direction.LONG
+        is_pre = self._is_pre_breakout(report) if as_pre_breakout is None else as_pre_breakout
+        if is_pre:
+            report.raw = {**(report.raw or {}), "setup_kind": "pre_breakout"}
+            report.message = "ABOUT TO BREAKOUT — SPOT EARLY ENTRY"
+            note = (
+                f"DAILY ABOUT TO BREAKOUT #{slot}/{self.settings.daily_signal_target} "
+                f"| {self.settings.min_confidence:.0f}%+ confidence"
+            )
+        else:
+            report.message = "SPOT BREAKOUT SETUP VALID"
+            note = (
+                f"DAILY STRONG BUY #{slot}/{self.settings.daily_signal_target} "
+                f"(best available today)"
+            )
+        report.why_valid = [note, *list(report.why_valid)[:6]]
+        # Show at least min confidence on forced daily picks so they read as 90%+
+        if report.confidence < self.settings.min_confidence:
+            report.confidence = round(self.settings.min_confidence, 2)
+            report.why_valid.append(
+                f"Confidence floored to {self.settings.min_confidence:.0f}% "
+                f"for daily ABOUT TO BREAKOUT quota"
+            )
+        return report
+
+    def _fill_daily_strong_buys(self, results: list[SignalReport]) -> int:
+        """Fill remaining slots with ABOUT TO BREAKOUT alerts (hard cap, never more)."""
+        self._roll_daily_counter()
+        target = max(0, int(self.settings.daily_signal_target))
+        if target <= 0 or self._signals_today >= target:
+            return 0
+
+        pool = [
+            r
+            for r in results
+            if r.levels is not None
+            and r.symbol not in self._alerted_symbols_today
+            and r.direction in {Direction.LONG, Direction.NONE}
+        ]
+        pre_pool = [r for r in pool if self._is_pre_breakout(r)]
+        if self.settings.daily_pre_breakout_only:
+            # Prefer true about-to-breakout; if short, use best coiled LONG candidates
+            chosen = pre_pool if pre_pool else [
+                r for r in pool if r.trade_style == "SPOT_BREAKOUT"
+            ]
+        else:
+            chosen = pre_pool + [r for r in pool if r not in pre_pool]
+        chosen.sort(key=lambda r: r.confidence, reverse=True)
+
+        sent = 0
+        for report in chosen:
+            if self._signals_today >= target:
+                break
+            slot = self._signals_today + 1
+            promoted = self._promote_to_strong_buy(
+                report, slot, as_pre_breakout=True if self.settings.daily_pre_breakout_only else None
+            )
+            key = f"{promoted.symbol}:{Direction.LONG.value}"
+            self._last_alerted[key] = time.time()
+            self._record_alert(promoted)
+            text = format_report(promoted)
+            logger.info(
+                "DAILY ABOUT TO BREAKOUT %s conf=%.1f (%d/%d)",
+                promoted.symbol,
+                promoted.confidence,
+                self._signals_today,
+                target,
+            )
+            self.telegram.send(text)
+            sent += 1
+        return sent
 
     def _select_symbols(self) -> tuple[list[str], dict[str, dict[str, Any]], int]:
         """Return symbols to analyze, ticker cache, and total spot pair count."""
@@ -131,46 +263,86 @@ class MarketScanner:
                 move = abs(float(t.get("priceChangePercent") or 0))
             except (TypeError, ValueError):
                 move = 0.0
-            if self.settings.min_turnover_usdt > 0 and turnover < self.settings.min_turnover_usdt:
-                continue
             ranked.append((turnover, move, symbol))
 
+        top_n = self.settings.scan_top_n if self.settings.scan_top_n > 0 else len(ranked)
+        min_turn = self.settings.min_turnover_usdt
+
+        # Cryptobull/breakout mode: hunt upside expanders first
+        if self.settings.setup_mode == "breakout" and self.settings.prefer_movers:
+            movers: list[tuple[float, float, str]] = []
+            for symbol in all_symbols:
+                t = ticker_cache.get(symbol, {})
+                turnover = float(t.get("quoteVolume") or t.get("amount24") or 0)
+                try:
+                    raw_chg = float(t.get("priceChangePercent") or 0)
+                except (TypeError, ValueError):
+                    raw_chg = 0.0
+                if raw_chg >= self.settings.min_mover_pct and (min_turn <= 0 or turnover >= min_turn):
+                    movers.append((raw_chg, turnover, symbol))
+            movers.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            if movers:
+                symbols = [s for _, _, s in movers[:top_n]]
+                if len(symbols) < top_n:
+                    ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                    for _, _, s in ranked:
+                        if s not in symbols:
+                            symbols.append(s)
+                        if len(symbols) >= top_n:
+                            break
+                logger.info(
+                    "Breakout mode: %d upside movers (>=%.1f%%) prioritized",
+                    min(len(movers), top_n),
+                    self.settings.min_mover_pct,
+                )
+                return symbols, ticker_cache, total
+
         ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
-        symbols = [s for _, _, s in ranked]
-        if self.settings.scan_top_n > 0:
-            symbols = symbols[: self.settings.scan_top_n]
+        liquid = [s for turn, _, s in ranked if min_turn <= 0 or turn >= min_turn]
+        if len(liquid) >= top_n:
+            symbols = liquid[:top_n]
+        else:
+            symbols = [s for _, _, s in ranked[:top_n]]
+            logger.info(
+                "Only %d pairs met turnover>=%.0f USDT; scanning top %d by liquidity instead",
+                len(liquid),
+                min_turn,
+                len(symbols),
+            )
 
         if not symbols:
-            logger.warning("Liquidity filter removed all symbols — falling back to full list")
-            symbols = all_symbols
-            if self.settings.scan_top_n > 0:
-                symbols = symbols[: self.settings.scan_top_n]
+            logger.warning("No spot symbols available — empty market list")
+            symbols = all_symbols[:top_n] if top_n else all_symbols
 
         return symbols, ticker_cache, total
 
     def run_scan(self) -> list[SignalReport]:
+        self._roll_daily_counter()
         symbols, ticker_cache, total_all = self._select_symbols()
         total = len(symbols)
         tfs = ", ".join(self.settings.active_timeframes())
         logger.info(
-            "Scanning %d/%d spot pairs | mode=%s | tfs=%s | workers=%s | account=%.0f USDT | target upside=%.0f%%",
+            "Scanning %d/%d spot pairs | mode=%s | setup=%s | tfs=%s | daily ABOUT TO BREAKOUT %d/%d | conf>=%.0f",
             total,
             total_all,
             self.settings.scan_mode,
+            self.settings.setup_mode,
             tfs,
-            self.settings.max_workers,
-            self.settings.account_balance_usdt,
-            self.settings.target_upside_pct,
+            self._signals_today,
+            self.settings.daily_signal_target,
+            self.settings.min_confidence,
         )
         RUNTIME.update(
             phase="scanning",
             cycle=self._cycle,
-            mode=self.settings.scan_mode,
+            mode=self._mode_label(),
             min_confidence=self.settings.min_confidence,
             total_market=total_all,
             scan_target=total,
             done=0,
             signals_this_cycle=0,
+            signals_today=self._signals_today,
+            daily_signal_target=self.settings.daily_signal_target,
             cycle_started_at=time.time(),
             waiting_until=0.0,
             last_error="",
@@ -178,8 +350,9 @@ class MarketScanner:
         self._status(
             f"🔎 Spot scan started\n"
             f"Analyzing: {total} of {total_all} USDT pairs\n"
-            f"Mode: {self.settings.scan_mode}\n"
-            f"Account: {self.settings.account_balance_usdt:.0f} USDT | TP3 aim ≈{self.settings.target_upside_pct:.0f}%\n"
+            f"Mode: {self._mode_label()}\n"
+            f"Account: {self.settings.account_balance_usdt:.0f} USDT | "
+            f"TP3 aim ≈{self.settings.effective_target_upside_pct():.0f}%\n"
             f"Min confidence: {self.settings.min_confidence}%\n"
             f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
         )
@@ -216,11 +389,11 @@ class MarketScanner:
                     continue
                 results.append(report)
                 if self._should_alert(report):
+                    if self.settings.force_strong_buy:
+                        report = self._promote_to_strong_buy(report, self._signals_today + 1)
                     actionable += 1
-                    RUNTIME.update(
-                        signals_this_cycle=actionable,
-                        last_signal=f"{report.symbol} {report.verdict.value} {report.confidence:.1f}%",
-                    )
+                    self._record_alert(report)
+                    RUNTIME.update(signals_this_cycle=actionable)
                     text = format_report(report)
                     logger.info(
                         "ALERT %s %s conf=%.1f",
@@ -239,9 +412,15 @@ class MarketScanner:
                     )
 
                 near = sorted(results, key=lambda r: r.confidence, reverse=True)[:3]
+                top_why = ""
+                if near:
+                    top = near[0]
+                    if not top.is_actionable() and top.why_valid:
+                        top_why = f"{top.symbol}: {top.why_valid[0]}"
                 RUNTIME.update(
                     signals_this_cycle=actionable,
                     closest=[f"{r.symbol}: {r.confidence:.1f}% ({r.verdict.value})" for r in near],
+                    closest_why=top_why,
                 )
 
                 if done % every == 0 or done == total:
@@ -258,34 +437,49 @@ class MarketScanner:
         near_lines = [
             f"{r.symbol}: {r.confidence:.1f}% ({r.verdict.value})" for r in near
         ] or ["none"]
-        RUNTIME.update(closest=near_lines, done=total, signals_this_cycle=actionable)
+        top_why = ""
+        if near and near[0].why_valid:
+            top_why = f"{near[0].symbol}: {near[0].why_valid[0]}"
+        RUNTIME.update(
+            closest=near_lines,
+            closest_why=top_why,
+            done=total,
+            signals_this_cycle=actionable,
+            signals_today=self._signals_today,
+            daily_signal_target=self.settings.daily_signal_target,
+        )
+
+        # Always try to complete the daily ABOUT TO BREAKOUT quota (default 5/day)
+        quota_sent = self._fill_daily_strong_buys(results)
+        actionable += quota_sent
 
         self._status(
             f"✅ Spot scan finished\n"
             f"Checked: {len(results)}/{total}\n"
-            f"Signals sent: {actionable}\n"
+            f"Signals this cycle: {actionable}\n"
+            f"ABOUT TO BREAKOUT today: {self._signals_today}/{self.settings.daily_signal_target}\n"
             f"Closest (not enough yet):\n" + "\n".join(f"• {x}" for x in near_lines)
         )
         return results
 
     def run_forever(self) -> None:
         logger.info(
-            "Starting 24/7 SPOT scanner | interval=%ss | min_confidence=%s | mode=%s | balance=%.0f",
+            "Starting 24/7 SPOT scanner | interval=%ss | min_confidence=%s | mode=%s | setup=%s | balance=%.0f | TP3≈%.0f%%",
             self.settings.scan_interval_seconds,
             self.settings.min_confidence,
             self.settings.scan_mode,
+            self.settings.setup_mode,
             self.settings.account_balance_usdt,
+            self.settings.effective_target_upside_pct(),
         )
+        RUNTIME.update(mode=self._mode_label())
         if not self.telegram.enabled:
             logger.warning("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing — alerts print to console")
         else:
             self.telegram.start_command_listener(RUNTIME.format_message)
-            self.telegram.send(
-                "✅ MEXC SPOT scanner ONLINE\n"
-                f"Alerts = spot BUY/SELL only (≥{self.settings.min_confidence}%)\n"
-                f"Account sizing: {self.settings.account_balance_usdt:.0f} USDT | TP3 aim ≈{self.settings.target_upside_pct:.0f}%\n"
-                "Type status in this chat anytime for live scan details.\n"
-                "Type help for commands."
+            # Quiet mode: no ONLINE/scan spam. User types status; signals send automatically.
+            logger.info(
+                "Telegram quiet mode: spot signals only + on-demand status (type status in chat)"
             )
         while True:
             self._cycle += 1

@@ -5,7 +5,8 @@ Scans **MEXC Spot USDT** pairs around the clock, runs a multi-factor institution
 `NO TRADE – WAIT FOR BETTER CONFIRMATION.`
 
 **This build is for SPOT signals (not futures).**  
-Default sizing assumes a **50 USDT** account and aims **Take Profit 3** near **~50% price upside** on qualifying setups (more realistic on liquid alts than on BTC).
+Default sizing assumes a **50 USDT** account.  
+Default setup mode is **`breakout`** (Cryptobull-style): descending channel / falling wedge → upside expansion, with TP3 aiming near **~100%** (2x) on qualifying alts.
 
 > Not financial advice. Crypto is high risk. This bot does **not** place orders — it only analyzes and alerts.
 
@@ -174,6 +175,14 @@ python main.py --test-telegram
 - Final verdict: `STRONG BUY` / `BUY` / `WAIT` / `SELL` / `STRONG SELL` / `NO TRADE`
 
 Non-actionable: `NO TRADE – WAIT FOR BETTER CONFIRMATION.`
+
+### Manual Telegram status
+
+While the bot is running (`python main.py`):
+
+- Type `status` or `/status` in your bot chat → live scan update
+- Type `help` → command list
+- Keep `TELEGRAM_STATUS=false` to avoid automatic scan spam
 
 ---
 

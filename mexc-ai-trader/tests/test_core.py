@@ -13,7 +13,7 @@ from src.analysis.spot_metrics import analyze_spot_metrics
 from src.analysis.trend import analyze_trend
 from src.indicators.technical import ema, rsi
 from src.mexc_client import display_symbol, normalize_spot_symbol
-from src.models import Direction, NO_TRADE_MSG, Verdict
+from src.models import Direction, NO_TRADE_MSG, SignalReport, Verdict
 from src.risk import build_trade_levels
 
 
@@ -125,6 +125,8 @@ def test_engine_no_trade_on_thin_conflict():
         account_balance_usdt=50,
         target_upside_pct=50,
         quality_filters=False,
+        setup_mode="standard",
+        breakout_aggressive=False,
     )
     report = analyze_symbol(
         "TESTUSDT",
@@ -142,3 +144,168 @@ def test_engine_no_trade_on_thin_conflict():
     assert report.verdict in (Verdict.NO_TRADE, Verdict.WAIT)
     assert NO_TRADE_MSG in report.message or report.direction == Direction.NONE
     assert "SPOT" in format_report(report) or "Spot" in format_report(report) or "spot" in format_report(report).lower()
+
+
+def _synthetic_descending_breakout(n: int = 80) -> pd.DataFrame:
+    """Build a descending channel then a strong upside breakout candle."""
+    rng = np.random.default_rng(3)
+    # Falling channel
+    highs = np.linspace(120, 90, n - 1) + rng.normal(0, 0.3, n - 1)
+    lows = np.linspace(100, 80, n - 1) + rng.normal(0, 0.3, n - 1)
+    closes = (highs + lows) / 2
+    opens = closes + rng.normal(0, 0.2, n - 1)
+    vols = rng.uniform(800, 1200, n - 1)
+    # Breakout candle
+    last_open = closes[-1]
+    last_close = last_open * 1.12
+    last_high = last_close * 1.02
+    last_low = last_open * 0.99
+    open_ = np.append(opens, last_open)
+    high = np.append(highs, last_high)
+    low = np.append(lows, last_low)
+    close = np.append(closes, last_close)
+    volume = np.append(vols, float(vols[-20:].mean()) * 2.5)
+    return pd.DataFrame(
+        {
+            "time": np.arange(n),
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+        }
+    )
+
+
+def test_breakout_detector_finds_channel_break():
+    from src.analysis.breakout import detect_channel_breakout
+
+    df = _synthetic_descending_breakout()
+    setup = detect_channel_breakout(df, lookback=80)
+    assert setup.direction in (Direction.LONG, Direction.NONE)
+    assert setup.score > 40
+    assert setup.volume_spike >= 1.0
+
+
+def test_breakout_mode_target_defaults():
+    settings = Settings(
+        telegram_bot_token="",
+        telegram_chat_id="",
+        setup_mode="breakout",
+        target_upside_pct=50,
+        tp3_pct=800,
+        max_stop_pct=0.08,
+    )
+    assert settings.effective_target_upside_pct() == 800.0
+    assert settings.effective_max_stop_pct() >= 0.12
+
+
+def test_pre_breakout_near_resistance():
+    from src.analysis.breakout import detect_pre_breakout
+
+    rng = np.random.default_rng(2)
+    n = 60
+    # Coil under 100 resistance
+    close = np.concatenate([np.linspace(90, 98.5, n - 1) + rng.normal(0, 0.2, n - 1), [98.8]])
+    high = np.maximum(close + 0.4, np.concatenate([np.full(n - 1, 100.0), [99.2]]))
+    # Keep prior highs at resistance 100
+    high[:-1] = np.maximum(high[:-1], 100.0)
+    low = close - 0.8
+    open_ = close - 0.2
+    vol = np.concatenate([rng.uniform(800, 1000, n - 1), [1600.0]])
+    df = pd.DataFrame(
+        {"time": np.arange(n), "open": open_, "high": high, "low": low, "close": close, "volume": vol}
+    )
+    setup = detect_pre_breakout(df, lookback=60, near_pct=3.0)
+    assert setup.pattern == "pre-breakout"
+    assert setup.score >= 50
+
+
+def test_daily_strong_buy_promote_floors_confidence():
+    from src.scanner import MarketScanner
+    from src.models import TradeLevels
+
+    settings = Settings(
+        telegram_bot_token="",
+        telegram_chat_id="",
+        min_confidence=90,
+        daily_signal_target=5,
+        force_strong_buy=True,
+        daily_pre_breakout_only=True,
+    )
+    scanner = MarketScanner(settings)
+    report = SignalReport(
+        symbol="TESTUSDT",
+        direction=Direction.LONG,
+        confidence=72.0,
+        verdict=Verdict.WAIT,
+        message=NO_TRADE_MSG,
+        levels=TradeLevels(1, 0.9, 1.5, 3, 9, 2.5, 1, 0.5, 50, 800),
+        why_valid=["ABOUT TO BREAKOUT (early entry): coiled under resistance"],
+        trade_style="SPOT_BREAKOUT",
+        raw={"setup_kind": "pre_breakout"},
+    )
+    out = scanner._promote_to_strong_buy(report, 1, as_pre_breakout=True)
+    assert out.verdict == Verdict.STRONG_BUY
+    assert out.confidence >= 90
+    assert "ABOUT TO BREAKOUT" in out.message
+    assert out.why_valid[0].startswith("DAILY ABOUT TO BREAKOUT #1/5")
+
+
+def test_daily_hard_cap_blocks_extra_alerts():
+    from src.scanner import MarketScanner
+    from src.models import TradeLevels
+
+    settings = Settings(
+        telegram_bot_token="",
+        telegram_chat_id="",
+        min_confidence=90,
+        daily_signal_target=5,
+        force_strong_buy=True,
+    )
+    scanner = MarketScanner(settings)
+    from datetime import datetime, timezone
+
+    scanner._signal_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    scanner._signals_today = 5
+    report = SignalReport(
+        symbol="TESTUSDT",
+        direction=Direction.LONG,
+        confidence=95.0,
+        verdict=Verdict.STRONG_BUY,
+        message="SPOT BREAKOUT SETUP VALID",
+        levels=TradeLevels(1, 0.9, 1.5, 3, 9, 2.5, 1, 0.5, 50, 800),
+    )
+    assert scanner._should_alert(report) is False
+
+
+def test_moonshot_levels_50_to_800():
+    from src.risk import build_moonshot_levels
+
+    df = _synthetic_trend(bull=True)
+    levels = build_moonshot_levels(df, account_balance=50, tp1_pct_pct=50, tp2_pct_pct=200, tp3_pct_pct=800)
+    assert levels is not None
+    assert levels.take_profit_1 > levels.entry
+    assert levels.upside_pct_tp3 == 800
+    # ~50% and ~200% and ~800%
+    assert abs((levels.take_profit_1 / levels.entry - 1) * 100 - 50) < 1
+    assert abs((levels.take_profit_2 / levels.entry - 1) * 100 - 200) < 1
+    assert abs((levels.take_profit_3 / levels.entry - 1) * 100 - 800) < 1
+
+def test_resistance_breakout_detector():
+    from src.analysis.breakout import detect_resistance_breakout
+
+    rng = np.random.default_rng(1)
+    n = 60
+    # Flat range then breakout
+    close = np.concatenate([np.full(n - 1, 100.0) + rng.normal(0, 0.3, n - 1), [112.0]])
+    high = np.concatenate([np.full(n - 1, 101.5), [114.0]])
+    low = np.concatenate([np.full(n - 1, 98.5), [100.5]])
+    open_ = np.concatenate([np.full(n - 1, 100.0), [101.0]])
+    vol = np.concatenate([rng.uniform(800, 1000, n - 1), [2500.0]])
+    df = pd.DataFrame(
+        {"time": np.arange(n), "open": open_, "high": high, "low": low, "close": close, "volume": vol}
+    )
+    setup = detect_resistance_breakout(df, lookback=60)
+    assert setup.score >= 50
+    assert setup.pattern == "horizontal resistance"
