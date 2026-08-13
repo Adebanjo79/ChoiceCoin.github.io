@@ -226,8 +226,8 @@ def test_daily_strong_buy_promote_floors_confidence():
     settings = Settings(
         telegram_bot_token="",
         telegram_chat_id="",
-        min_confidence=80,
-        daily_signal_target=3,
+        min_confidence=90,
+        daily_signal_target=5,
         force_strong_buy=True,
     )
     scanner = MarketScanner(settings)
@@ -241,7 +241,34 @@ def test_daily_strong_buy_promote_floors_confidence():
     )
     out = scanner._promote_to_strong_buy(report, 1)
     assert out.verdict == Verdict.STRONG_BUY
-    assert out.confidence >= 80
+    assert out.confidence >= 90
+
+
+def test_daily_hard_cap_blocks_extra_alerts():
+    from src.scanner import MarketScanner
+    from src.models import TradeLevels
+
+    settings = Settings(
+        telegram_bot_token="",
+        telegram_chat_id="",
+        min_confidence=90,
+        daily_signal_target=5,
+        force_strong_buy=True,
+    )
+    scanner = MarketScanner(settings)
+    from datetime import datetime, timezone
+
+    scanner._signal_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    scanner._signals_today = 5
+    report = SignalReport(
+        symbol="TESTUSDT",
+        direction=Direction.LONG,
+        confidence=95.0,
+        verdict=Verdict.STRONG_BUY,
+        message="SPOT BREAKOUT SETUP VALID",
+        levels=TradeLevels(1, 0.9, 1.5, 3, 9, 2.5, 1, 0.5, 50, 800),
+    )
+    assert scanner._should_alert(report) is False
 
 
 def test_moonshot_levels_50_to_800():

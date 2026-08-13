@@ -123,7 +123,7 @@ def analyze_symbol(
 
     # ------------------------------------------------------------------
     # AGGRESSIVE BREAKOUT PATH: no institutional hard-blocks
-    # Immediate STRONG BUY when confidence >= MIN_CONFIDENCE (default 80).
+    # Immediate STRONG BUY when confidence >= MIN_CONFIDENCE (default 90).
     # Lower-scoring breakouts keep levels as WAIT candidates for daily top-3.
     # TP ladder: TP1=50%, TP2=200%, TP3=800% (configurable).
     # ------------------------------------------------------------------

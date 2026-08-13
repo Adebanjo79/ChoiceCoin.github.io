@@ -125,6 +125,10 @@ class MarketScanner:
             return None
 
     def _should_alert(self, report: SignalReport) -> bool:
+        self._roll_daily_counter()
+        target = max(0, int(self.settings.daily_signal_target))
+        if target > 0 and self._signals_today >= target:
+            return False
         if not report.is_actionable():
             return False
         if report.confidence < self.settings.min_confidence:
@@ -146,7 +150,7 @@ class MarketScanner:
         report.message = "SPOT BREAKOUT SETUP VALID"
         note = f"DAILY STRONG BUY #{slot}/{self.settings.daily_signal_target} (best available today)"
         report.why_valid = [note, *list(report.why_valid)[:6]]
-        # Show at least min confidence on forced daily picks so they read as 80%+
+        # Show at least min confidence on forced daily picks so they read as 90%+
         if report.confidence < self.settings.min_confidence:
             report.confidence = round(self.settings.min_confidence, 2)
             report.why_valid.append(
@@ -155,7 +159,7 @@ class MarketScanner:
         return report
 
     def _fill_daily_strong_buys(self, results: list[SignalReport]) -> int:
-        """Ensure up to DAILY_SIGNAL_TARGET STRONG BUY alerts are sent each UTC day."""
+        """Fill remaining daily slots up to DAILY_SIGNAL_TARGET (hard cap, never more)."""
         self._roll_daily_counter()
         target = max(0, int(self.settings.daily_signal_target))
         if target <= 0 or self._signals_today >= target:

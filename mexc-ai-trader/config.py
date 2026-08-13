@@ -46,10 +46,10 @@ class Settings:
     )
     # Default 50 USDT — matches "50 USDT upward / ~50% gain" spot goal
     account_balance_usdt: float = field(default_factory=lambda: _env_float("ACCOUNT_BALANCE_USDT", 50.0))
-    # 70% + QUALITY_FILTERS is the recommended anti-spam mode
-    min_confidence: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE", 80.0))
-    # Always deliver this many STRONG BUY spot signals per UTC day
-    daily_signal_target: int = field(default_factory=lambda: _env_int("DAILY_SIGNAL_TARGET", 3))
+    # Instant alerts only at this confidence (about-to-breakout / breakout)
+    min_confidence: float = field(default_factory=lambda: _env_float("MIN_CONFIDENCE", 90.0))
+    # Hard daily cap — never send more than this many STRONG BUY signals per UTC day
+    daily_signal_target: int = field(default_factory=lambda: _env_int("DAILY_SIGNAL_TARGET", 5))
     force_strong_buy: bool = field(
         default_factory=lambda: os.getenv("FORCE_STRONG_BUY", "true").strip().lower()
         in {"1", "true", "yes"}

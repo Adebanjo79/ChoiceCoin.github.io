@@ -18,7 +18,7 @@ class RuntimeStatus:
     done: int = 0
     signals_this_cycle: int = 0
     signals_today: int = 0
-    daily_signal_target: int = 3
+    daily_signal_target: int = 5
     last_symbol: str = ""
     closest: list[str] = field(default_factory=list)
     closest_why: str = ""
