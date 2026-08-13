@@ -19,7 +19,7 @@ from src.analysis.trend import analyze_trend, higher_tf_summary
 from src.analysis.volume import analyze_volume
 from src.mexc_client import display_symbol
 from src.models import NO_TRADE_MSG, Direction, FactorResult, SignalReport, Verdict
-from src.risk import build_trade_levels
+from src.risk import build_moonshot_levels, build_trade_levels
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,74 @@ def analyze_symbol(
     setup_mode = getattr(settings, "setup_mode", "standard")
     primary = _pick_level_frame(frames, setup_mode)
     breakout_factor = analyze_breakout_setup(frames) if setup_mode == "breakout" else None
+
+    # ------------------------------------------------------------------
+    # AGGRESSIVE BREAKOUT PATH: no institutional hard-blocks
+    # Fire immediately when breakout score clears threshold.
+    # TP ladder: TP1=50%, TP2=200%, TP3=800% (configurable).
+    # ------------------------------------------------------------------
+    if (
+        setup_mode == "breakout"
+        and getattr(settings, "breakout_aggressive", True)
+        and breakout_factor is not None
+        and primary is not None
+        and breakout_factor.score >= getattr(settings, "breakout_min_score", 55.0)
+    ):
+        levels = build_moonshot_levels(
+            primary,
+            account_balance=settings.account_balance_usdt,
+            risk_pct=settings.risk_pct,
+            max_stop_pct=settings.effective_max_stop_pct(),
+            tp1_pct_pct=settings.tp1_pct,
+            tp2_pct_pct=settings.tp2_pct,
+            tp3_pct_pct=settings.tp3_pct,
+        )
+        confidence = round(min(99.0, max(breakout_factor.score, 55.0)), 2)
+        why = [
+            f"BEST BREAKOUT NOW: {breakout_factor.details[0] if breakout_factor.details else 'spot breakout'}",
+            *breakout_factor.details[:5],
+            f"TP ladder: +{settings.tp1_pct:.0f}% / +{settings.tp2_pct:.0f}% / +{settings.tp3_pct:.0f}%",
+        ]
+        if levels is None:
+            return SignalReport(
+                symbol=symbol,
+                direction=Direction.NONE,
+                confidence=confidence,
+                verdict=Verdict.WAIT,
+                message=NO_TRADE_MSG,
+                why_valid=["Breakout seen but could not build price levels"],
+                higher_tf_trend=higher_tf_summary(frames),
+                factor_scores={"Breakout Setup": breakout_factor.score},
+                trade_style="SPOT_BREAKOUT",
+            )
+        verdict = (
+            Verdict.STRONG_BUY
+            if confidence >= 80
+            else Verdict.BUY
+        )
+        return SignalReport(
+            symbol=symbol,
+            direction=Direction.LONG,
+            confidence=confidence,
+            verdict=verdict,
+            message="SPOT BREAKOUT SETUP VALID",
+            why_valid=why,
+            higher_tf_trend=higher_tf_summary(frames),
+            levels=levels,
+            estimated_holding_time="1d – 21d (aggressive spot moonshot ladder)",
+            invalidation=[
+                f"Close beyond stop-loss at {levels.stop_loss}",
+                "Breakout fails and price re-enters prior range",
+            ],
+            major_risks=[
+                "800% targets are rare — scale out at TP1/TP2",
+                "High-volatility alts can dump fast — use the stop",
+                f"Sized for {settings.account_balance_usdt:.0f} USDT spot account",
+            ],
+            factor_scores={"Breakout Setup": round(breakout_factor.score, 2)},
+            trade_style="SPOT_BREAKOUT",
+            raw={"factors": {"Breakout Setup": breakout_factor.details}},
+        )
 
     factors: list[FactorResult] = [
         analyze_trend(frames),

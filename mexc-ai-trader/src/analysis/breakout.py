@@ -158,8 +158,9 @@ def detect_channel_breakout(df: pd.DataFrame, lookback: int = 60) -> BreakoutSet
         details.append("Close weak in candle range — possible fake break")
 
     score = float(min(100.0, max(0.0, score)))
-    found = score >= 70 and vol_spike >= 1.2 and (broke_line or broke_range)
-    direction = Direction.LONG if found or score >= 60 else Direction.NONE
+    # Lower bar so aggressive mode catches more live breakouts
+    found = score >= 55 and vol_spike >= 1.05 and (broke_line or broke_range)
+    direction = Direction.LONG if found or score >= 55 else Direction.NONE
 
     atr_val = float(atr(window, 14).iloc[-1])
     details.append(f"ATR(14)≈{atr_val:.6f} | breakout level≈{resist_now:.6f}")
@@ -245,11 +246,11 @@ def detect_resistance_breakout(df: pd.DataFrame, lookback: int = 60) -> Breakout
         details.append("Weak close in candle — possible fakeout")
 
     score = float(min(100.0, max(0.0, score)))
-    found = score >= 68 and vol_spike >= 1.15
+    found = score >= 55 and vol_spike >= 1.05
     return BreakoutSetup(
         found=found,
         score=score,
-        direction=Direction.LONG if found or score >= 60 else Direction.NONE,
+        direction=Direction.LONG if found or score >= 55 else Direction.NONE,
         details=details,
         pattern="horizontal resistance",
         breakout_level=resistance,
@@ -291,13 +292,13 @@ def analyze_breakout_setup(frames: dict[str, pd.DataFrame]) -> FactorResult:
 
     best = max(candidates, key=lambda c: (c.found, c.score))
     details = list(best.details)
-    if best.found:
+    if best.found or best.score >= 55:
         details.insert(0, f"CRYPTOBULL-STYLE SETUP: {best.pattern} breakout")
     return FactorResult(
         name="Breakout Setup",
         score=best.score,
-        direction=best.direction if best.score >= 55 else Direction.NONE,
+        direction=best.direction if best.score >= 50 else Direction.NONE,
         details=details,
-        aligned=best.found,
+        aligned=best.found or best.score >= 55,
         weight=0.20,
     )

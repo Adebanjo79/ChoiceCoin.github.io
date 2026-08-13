@@ -28,7 +28,7 @@ class MarketScanner:
         )
         self.telegram = TelegramAlerter(settings.telegram_bot_token, settings.telegram_chat_id)
         self._last_alerted: dict[str, float] = {}
-        self._alert_cooldown_sec = 60 * 60  # 1h per symbol direction
+        self._alert_cooldown_sec = 15 * 60  # 15m so strong breakouts can re-alert faster
         self._cycle = 0
         RUNTIME.update(
             mode=self._mode_label(),

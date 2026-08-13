@@ -96,6 +96,15 @@ class Settings:
         default_factory=lambda: os.getenv("PREFER_MOVERS", "true").strip().lower() in {"1", "true", "yes"}
     )
     min_mover_pct: float = field(default_factory=lambda: _env_float("MIN_MOVER_PCT", 5.0))
+    # Aggressive breakout: fire alerts without institutional hard-blocks
+    breakout_aggressive: bool = field(
+        default_factory=lambda: os.getenv("BREAKOUT_AGGRESSIVE", "true").strip().lower()
+        in {"1", "true", "yes"}
+    )
+    breakout_min_score: float = field(default_factory=lambda: _env_float("BREAKOUT_MIN_SCORE", 55.0))
+    tp1_pct: float = field(default_factory=lambda: _env_float("TP1_PCT", 50.0))
+    tp2_pct: float = field(default_factory=lambda: _env_float("TP2_PCT", 200.0))
+    tp3_pct: float = field(default_factory=lambda: _env_float("TP3_PCT", 800.0))
     risk_pct: float = 0.01
     min_rr: float = 2.5
     preferred_rr: float = 3.0
@@ -108,7 +117,6 @@ class Settings:
     def active_timeframes(self) -> tuple[str, ...]:
         mode = self.scan_mode
         if self.setup_mode == "breakout":
-            # HTF structure first for Cryptobull-style swings
             if mode == "full":
                 return self.timeframes
             return ("Hour4", "Day1", "Min15")
@@ -117,12 +125,13 @@ class Settings:
         return ("Min15", "Hour4", "Day1")
 
     def effective_target_upside_pct(self) -> float:
-        # Respect TARGET_UPSIDE_PCT (use 50 for ~50% Cryptobull-style targets)
+        if self.setup_mode == "breakout":
+            return self.tp3_pct
         return self.target_upside_pct
 
     def effective_max_stop_pct(self) -> float:
-        if self.setup_mode == "breakout" and self.max_stop_pct <= 0.08:
-            return 0.18  # alts need more room on daily breakouts
+        if self.setup_mode == "breakout":
+            return max(self.max_stop_pct, 0.12)
         return self.max_stop_pct
 
     def telegram_ready(self) -> bool:

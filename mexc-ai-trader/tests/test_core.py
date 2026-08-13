@@ -191,11 +191,25 @@ def test_breakout_mode_target_defaults():
         telegram_chat_id="",
         setup_mode="breakout",
         target_upside_pct=50,
+        tp3_pct=800,
         max_stop_pct=0.08,
     )
-    assert settings.effective_target_upside_pct() == 50.0
-    assert settings.effective_max_stop_pct() == 0.18
+    assert settings.effective_target_upside_pct() == 800.0
+    assert settings.effective_max_stop_pct() >= 0.12
 
+
+def test_moonshot_levels_50_to_800():
+    from src.risk import build_moonshot_levels
+
+    df = _synthetic_trend(bull=True)
+    levels = build_moonshot_levels(df, account_balance=50, tp1_pct_pct=50, tp2_pct_pct=200, tp3_pct_pct=800)
+    assert levels is not None
+    assert levels.take_profit_1 > levels.entry
+    assert levels.upside_pct_tp3 == 800
+    # ~50% and ~200% and ~800%
+    assert abs((levels.take_profit_1 / levels.entry - 1) * 100 - 50) < 1
+    assert abs((levels.take_profit_2 / levels.entry - 1) * 100 - 200) < 1
+    assert abs((levels.take_profit_3 / levels.entry - 1) * 100 - 800) < 1
 
 def test_resistance_breakout_detector():
     from src.analysis.breakout import detect_resistance_breakout

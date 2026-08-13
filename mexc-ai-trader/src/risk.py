@@ -1,4 +1,4 @@
-"""Risk management for spot: SL/TP, R:R filter, 1% size, optional ~50% upside TP3."""
+"""Risk management for spot: SL/TP, R:R filter, moonshot breakout targets."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def build_trade_levels(
     Spot-focused levels.
 
     For LONG (spot BUY): TP1/TP2 follow R-multiples; TP3 aims toward
-    ``target_upside_pct`` price gain (default 50%) when R:R still clears min_rr.
+    ``target_upside_pct`` price gain when R:R still clears min_rr.
     For SHORT (spot SELL/exit): classic R-multiples only.
     """
     if df is None or len(df) < 30 or direction not in (Direction.LONG, Direction.SHORT):
@@ -42,7 +42,6 @@ def build_trade_levels(
             return None
         tp1 = entry + risk * 1.5
         tp2 = entry + risk * preferred_rr
-        # Prefer ~50% price upside for TP3 when R:R to that level still clears min_rr
         stretch = entry * (1.0 + max(target_upside_pct, 0.0) / 100.0)
         stretch_rr = (stretch - entry) / risk if risk else 0.0
         if stretch > tp2 and stretch_rr >= min_rr:
@@ -67,11 +66,9 @@ def build_trade_levels(
     if rr < min_rr:
         return None
 
-    # Reject absurd stop as unacceptable risk distance — unless clamp_stop
     if risk / entry > max_stop_pct:
         if not clamp_stop:
             return None
-        # Cap stop distance so alt breakouts can still alert with defined risk
         if direction == Direction.LONG:
             stop = entry * (1.0 - max_stop_pct)
             risk = entry - stop
@@ -93,10 +90,9 @@ def build_trade_levels(
             return None
 
     risk_amount = account_balance * risk_pct
-    position_size = risk_amount / risk if risk else 0.0  # coin units
+    position_size = risk_amount / risk if risk else 0.0
     position_notional = position_size * entry
 
-    # Cap notional at account balance for spot (no leverage)
     if position_notional > account_balance and entry > 0:
         position_size = account_balance / entry
         position_notional = account_balance
@@ -112,4 +108,65 @@ def build_trade_levels(
         risk_amount=round(risk_amount, 4),
         position_notional=round(position_notional, 4),
         upside_pct_tp3=round(upside_to_tp3, 2),
+    )
+
+
+def build_moonshot_levels(
+    df: pd.DataFrame,
+    account_balance: float,
+    risk_pct: float = 0.01,
+    max_stop_pct: float = 0.12,
+    tp1_pct_pct: float = 50.0,
+    tp2_pct_pct: float = 200.0,
+    tp3_pct_pct: float = 800.0,
+) -> TradeLevels | None:
+    """
+    Aggressive spot LONG ladder for breakout alerts:
+    TP1 ≈ +50%, TP2 ≈ +200%, TP3 ≈ +800% (configurable).
+    Stop is capped so the alert is never blocked by wide structure stops.
+    """
+    if df is None or len(df) < 5:
+        return None
+    entry = float(df["close"].iloc[-1])
+    if entry <= 0:
+        return None
+
+    atr_val = float(atr(df, 14).iloc[-1]) if len(df) >= 20 else entry * 0.05
+    _, lo_idx = swing_points(df["low"], 2, 2) if len(df) >= 20 else ([], [])
+    structure_sl = float(df["low"].iloc[lo_idx[-1]]) if lo_idx else entry - 1.5 * atr_val
+    stop = min(structure_sl, entry - max(atr_val, entry * 0.03)) * 0.999
+    # Never block: clamp stop distance
+    min_stop = entry * (1.0 - max_stop_pct)
+    if stop < min_stop:
+        stop = min_stop
+    if stop >= entry:
+        stop = entry * (1.0 - min(max_stop_pct, 0.08))
+
+    risk = entry - stop
+    if risk <= 0:
+        return None
+
+    tp1 = entry * (1.0 + max(tp1_pct_pct, 1.0) / 100.0)
+    tp2 = entry * (1.0 + max(tp2_pct_pct, tp1_pct_pct) / 100.0)
+    tp3 = entry * (1.0 + max(tp3_pct_pct, tp2_pct_pct) / 100.0)
+    rr = (tp1 - entry) / risk
+
+    risk_amount = account_balance * risk_pct
+    position_size = risk_amount / risk
+    position_notional = position_size * entry
+    if position_notional > account_balance:
+        position_size = account_balance / entry
+        position_notional = account_balance
+
+    return TradeLevels(
+        entry=round(entry, 8),
+        stop_loss=round(stop, 8),
+        take_profit_1=round(tp1, 8),
+        take_profit_2=round(tp2, 8),
+        take_profit_3=round(tp3, 8),
+        risk_reward=round(rr, 2),
+        position_size=round(position_size, 6),
+        risk_amount=round(risk_amount, 4),
+        position_notional=round(position_notional, 4),
+        upside_pct_tp3=round(tp3_pct_pct, 2),
     )
