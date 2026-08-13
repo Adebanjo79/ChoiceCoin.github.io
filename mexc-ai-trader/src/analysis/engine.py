@@ -144,8 +144,11 @@ def analyze_symbol(
             tp3_pct_pct=settings.tp3_pct,
         )
         confidence = round(min(99.0, max(breakout_factor.score, 55.0)), 2)
+        joined = " ".join(breakout_factor.details).lower()
+        pre = "pre-breakout" in joined or "about to breakout" in joined or "coiled under" in joined
+        headline = "ABOUT TO BREAKOUT (early entry)" if pre else "BREAKOUT CONFIRMED"
         why = [
-            f"BEST BREAKOUT NOW: {breakout_factor.details[0] if breakout_factor.details else 'spot breakout'}",
+            f"{headline}: {breakout_factor.details[0] if breakout_factor.details else 'spot breakout'}",
             *breakout_factor.details[:5],
             f"TP ladder: +{settings.tp1_pct:.0f}% / +{settings.tp2_pct:.0f}% / +{settings.tp3_pct:.0f}%",
         ]

@@ -198,6 +198,27 @@ def test_breakout_mode_target_defaults():
     assert settings.effective_max_stop_pct() >= 0.12
 
 
+def test_pre_breakout_near_resistance():
+    from src.analysis.breakout import detect_pre_breakout
+
+    rng = np.random.default_rng(2)
+    n = 60
+    # Coil under 100 resistance
+    close = np.concatenate([np.linspace(90, 98.5, n - 1) + rng.normal(0, 0.2, n - 1), [98.8]])
+    high = np.maximum(close + 0.4, np.concatenate([np.full(n - 1, 100.0), [99.2]]))
+    # Keep prior highs at resistance 100
+    high[:-1] = np.maximum(high[:-1], 100.0)
+    low = close - 0.8
+    open_ = close - 0.2
+    vol = np.concatenate([rng.uniform(800, 1000, n - 1), [1600.0]])
+    df = pd.DataFrame(
+        {"time": np.arange(n), "open": open_, "high": high, "low": low, "close": close, "volume": vol}
+    )
+    setup = detect_pre_breakout(df, lookback=60, near_pct=3.0)
+    assert setup.pattern == "pre-breakout"
+    assert setup.score >= 50
+
+
 def test_daily_strong_buy_promote_floors_confidence():
     from src.scanner import MarketScanner
     from src.models import TradeLevels

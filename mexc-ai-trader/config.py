@@ -108,6 +108,11 @@ class Settings:
         in {"1", "true", "yes"}
     )
     breakout_min_score: float = field(default_factory=lambda: _env_float("BREAKOUT_MIN_SCORE", 55.0))
+    # Alert when price is within this % under resistance (early / about-to-break)
+    pre_breakout_near_pct: float = field(default_factory=lambda: _env_float("PRE_BREAKOUT_NEAR_PCT", 3.0))
+    pre_breakout_enabled: bool = field(
+        default_factory=lambda: os.getenv("PRE_BREAKOUT", "true").strip().lower() in {"1", "true", "yes"}
+    )
     tp1_pct: float = field(default_factory=lambda: _env_float("TP1_PCT", 50.0))
     tp2_pct: float = field(default_factory=lambda: _env_float("TP2_PCT", 200.0))
     tp3_pct: float = field(default_factory=lambda: _env_float("TP3_PCT", 800.0))

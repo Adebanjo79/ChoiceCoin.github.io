@@ -212,6 +212,10 @@ def detect_resistance_breakout(df: pd.DataFrame, lookback: int = 60) -> Breakout
     details.append(f"Breakout volume x{vol_spike:.2f} | impulse {impulse_pct:.1f}%")
 
     if not broke:
+        # Fall through to pre-breakout scoring (about-to-break setups)
+        pre = detect_pre_breakout(df, lookback=lookback)
+        if pre.score >= 25:
+            return pre
         score = 40.0 if compressed else 25.0
         return BreakoutSetup(
             False,
@@ -259,8 +263,110 @@ def detect_resistance_breakout(df: pd.DataFrame, lookback: int = 60) -> Breakout
     )
 
 
+def detect_pre_breakout(
+    df: pd.DataFrame,
+    lookback: int = 60,
+    near_pct: float | None = None,
+) -> BreakoutSetup:
+    """
+    ABOUT-TO-BREAKOUT setup: price coiled under resistance, ready to expand.
+
+    Triggers before the candle closes above resistance — early entry style.
+    """
+    if near_pct is None:
+        try:
+            from config import settings as _settings
+
+            near_pct = float(getattr(_settings, "pre_breakout_near_pct", 3.0))
+            if not getattr(_settings, "pre_breakout_enabled", True):
+                return BreakoutSetup(False, 0.0, Direction.NONE, ["Pre-breakout disabled"])
+        except Exception:  # noqa: BLE001
+            near_pct = 3.0
+    details: list[str] = []
+    if df is None or len(df) < 35:
+        return BreakoutSetup(False, 0.0, Direction.NONE, ["Insufficient bars for pre-breakout"])
+
+    window = df.iloc[-lookback:].reset_index(drop=True)
+    prior = window.iloc[:-1]
+    resistance = float(prior["high"].tail(25).max())
+    support = float(prior["low"].tail(25).min())
+    price = float(window["close"].iloc[-1])
+    open_ = float(window["open"].iloc[-1])
+    high = float(window["high"].iloc[-1])
+    low = float(window["low"].iloc[-1])
+
+    if resistance <= 0 or price >= resistance:
+        return BreakoutSetup(False, 20.0, Direction.NONE, ["Not in pre-breakout zone"])
+
+    dist_pct = (resistance - price) / resistance * 100.0
+    near = dist_pct <= max(near_pct, 0.5)
+    mid = prior.tail(20)
+    range_pct = (float(mid["high"].max()) - float(mid["low"].min())) / max(price, 1e-12) * 100
+    compressed = range_pct <= 40.0
+
+    # Higher lows = spring-loading under resistance
+    lows = mid["low"].to_numpy(dtype=float)
+    higher_lows = len(lows) >= 6 and float(lows[-3:].mean()) > float(lows[:5].mean())
+
+    vol = window["volume"]
+    vol_avg = float(vol.iloc[-21:-1].mean()) if len(vol) > 21 else float(vol.mean())
+    vol_now = float(vol.iloc[-1])
+    vol_spike = (vol_now / vol_avg) if vol_avg > 0 else 0.0
+    vol_rising = len(vol) >= 4 and float(vol.iloc[-1]) > float(vol.iloc[-4:-1].mean())
+
+    impulse_pct = ((price - open_) / open_ * 100.0) if open_ else 0.0
+    close_pos = (price - low) / (high - low + 1e-12)
+    pressing = close_pos >= 0.6 and price >= open_
+
+    details.append(f"PRE-BREAKOUT: {dist_pct:.2f}% under resistance≈{resistance:.6f}")
+    details.append(f"Support≈{support:.6f} | range≈{range_pct:.1f}%")
+    details.append(f"Volume x{vol_spike:.2f} | rising={vol_rising} | pressing highs={pressing}")
+
+    if not near:
+        return BreakoutSetup(
+            False,
+            30.0 if compressed else 18.0,
+            Direction.NONE,
+            details + [f"Too far from resistance (need ≤{near_pct:.1f}%)"],
+            pattern="pre-breakout",
+            breakout_level=resistance,
+            impulse_pct=impulse_pct,
+            volume_spike=vol_spike,
+        )
+
+    score = 62.0
+    details.append("Price is coiled under resistance — breakout likely soon")
+    if compressed:
+        score += 10
+        details.append("Tight consolidation (energy build)")
+    if higher_lows:
+        score += 8
+        details.append("Higher lows into resistance (bullish pressure)")
+    if vol_rising or vol_spike >= 1.2:
+        score += 10
+        details.append("Volume building into the level")
+    if pressing:
+        score += 8
+        details.append("Candle pressing highs into resistance")
+    if impulse_pct >= 1.5:
+        score += 5
+
+    score = float(min(99.0, max(0.0, score)))
+    found = score >= 70 and near and (compressed or higher_lows)
+    return BreakoutSetup(
+        found=found,
+        score=score,
+        direction=Direction.LONG if found or score >= 60 else Direction.NONE,
+        details=details,
+        pattern="pre-breakout",
+        breakout_level=resistance,
+        impulse_pct=impulse_pct,
+        volume_spike=vol_spike,
+    )
+
+
 def analyze_breakout_setup(frames: dict[str, pd.DataFrame]) -> FactorResult:
-    """Score Daily/4H for channel/wedge OR horizontal resistance breakouts."""
+    """Score Daily/4H for pre-breakout, channel/wedge, or resistance breakouts."""
     day = frames.get("Day1")
     h4 = frames.get("Hour4")
     primary = frames.get("Min15")
@@ -270,7 +376,7 @@ def analyze_breakout_setup(frames: dict[str, pd.DataFrame]) -> FactorResult:
     def _add(df: pd.DataFrame | None, label: str, lookback: int) -> None:
         if df is None or getattr(df, "empty", True):
             return
-        for detector in (detect_channel_breakout, detect_resistance_breakout):
+        for detector in (detect_pre_breakout, detect_channel_breakout, detect_resistance_breakout):
             setup = detector(df, lookback=min(lookback, len(df)))
             setup.details = [f"[{label}] {x}" for x in setup.details]
             candidates.append(setup)
@@ -293,7 +399,8 @@ def analyze_breakout_setup(frames: dict[str, pd.DataFrame]) -> FactorResult:
     best = max(candidates, key=lambda c: (c.found, c.score))
     details = list(best.details)
     if best.found or best.score >= 55:
-        details.insert(0, f"CRYPTOBULL-STYLE SETUP: {best.pattern} breakout")
+        label = "ABOUT TO BREAKOUT" if "pre-breakout" in best.pattern else "BREAKOUT"
+        details.insert(0, f"CRYPTOBULL-STYLE {label}: {best.pattern}")
     return FactorResult(
         name="Breakout Setup",
         score=best.score,
