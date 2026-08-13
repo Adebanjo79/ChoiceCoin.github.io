@@ -334,25 +334,29 @@ def detect_pre_breakout(
             volume_spike=vol_spike,
         )
 
-    score = 62.0
+    # Score calibrated so strong coiled setups can clear 90% for Telegram alerts
+    score = 72.0
     details.append("Price is coiled under resistance — breakout likely soon")
     if compressed:
-        score += 10
+        score += 8
         details.append("Tight consolidation (energy build)")
     if higher_lows:
-        score += 8
+        score += 7
         details.append("Higher lows into resistance (bullish pressure)")
     if vol_rising or vol_spike >= 1.2:
-        score += 10
+        score += 8
         details.append("Volume building into the level")
     if pressing:
-        score += 8
+        score += 6
         details.append("Candle pressing highs into resistance")
     if impulse_pct >= 1.5:
+        score += 4
+    if dist_pct <= max(near_pct * 0.5, 0.8):
         score += 5
+        details.append("Very close to resistance (imminent)")
 
     score = float(min(99.0, max(0.0, score)))
-    found = score >= 70 and near and (compressed or higher_lows)
+    found = score >= 78 and near and (compressed or higher_lows or pressing)
     return BreakoutSetup(
         found=found,
         score=score,

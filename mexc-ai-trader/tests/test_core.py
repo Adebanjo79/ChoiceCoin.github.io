@@ -125,6 +125,8 @@ def test_engine_no_trade_on_thin_conflict():
         account_balance_usdt=50,
         target_upside_pct=50,
         quality_filters=False,
+        setup_mode="standard",
+        breakout_aggressive=False,
     )
     report = analyze_symbol(
         "TESTUSDT",
@@ -229,6 +231,7 @@ def test_daily_strong_buy_promote_floors_confidence():
         min_confidence=90,
         daily_signal_target=5,
         force_strong_buy=True,
+        daily_pre_breakout_only=True,
     )
     scanner = MarketScanner(settings)
     report = SignalReport(
@@ -238,10 +241,15 @@ def test_daily_strong_buy_promote_floors_confidence():
         verdict=Verdict.WAIT,
         message=NO_TRADE_MSG,
         levels=TradeLevels(1, 0.9, 1.5, 3, 9, 2.5, 1, 0.5, 50, 800),
+        why_valid=["ABOUT TO BREAKOUT (early entry): coiled under resistance"],
+        trade_style="SPOT_BREAKOUT",
+        raw={"setup_kind": "pre_breakout"},
     )
-    out = scanner._promote_to_strong_buy(report, 1)
+    out = scanner._promote_to_strong_buy(report, 1, as_pre_breakout=True)
     assert out.verdict == Verdict.STRONG_BUY
     assert out.confidence >= 90
+    assert "ABOUT TO BREAKOUT" in out.message
+    assert out.why_valid[0].startswith("DAILY ABOUT TO BREAKOUT #1/5")
 
 
 def test_daily_hard_cap_blocks_extra_alerts():

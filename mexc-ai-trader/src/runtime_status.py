@@ -86,7 +86,7 @@ class RuntimeStatus:
             f"Progress: {progress}\n"
             f"Spot market size: {s['total_market']} pairs\n"
             f"Signals this cycle: {s['signals_this_cycle']}\n"
-            f"STRONG BUY today: {s['signals_today']}/{s['daily_signal_target']}\n"
+            f"ABOUT TO BREAKOUT today: {s['signals_today']}/{s['daily_signal_target']}\n"
             f"Last coin checked: {s['last_symbol'] or 'n/a'}\n"
             f"Last trade alert: {s['last_signal']}\n"
             f"Uptime: {uh}h {um}m {us}s\n"

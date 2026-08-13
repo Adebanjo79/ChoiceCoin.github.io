@@ -54,6 +54,11 @@ class Settings:
         default_factory=lambda: os.getenv("FORCE_STRONG_BUY", "true").strip().lower()
         in {"1", "true", "yes"}
     )
+    # Daily quota fills with ABOUT TO BREAKOUT setups only (not confirmed breakouts)
+    daily_pre_breakout_only: bool = field(
+        default_factory=lambda: os.getenv("DAILY_PRE_BREAKOUT_ONLY", "true").strip().lower()
+        in {"1", "true", "yes"}
+    )
     scan_interval_seconds: int = field(default_factory=lambda: _env_int("SCAN_INTERVAL_SECONDS", 600))
     max_workers: int = field(default_factory=lambda: _env_int("MAX_WORKERS", 3))
     symbol_whitelist: list[str] = field(default_factory=lambda: _env_list("SYMBOL_WHITELIST"))

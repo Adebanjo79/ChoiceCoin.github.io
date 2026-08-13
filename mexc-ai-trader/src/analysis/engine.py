@@ -124,7 +124,7 @@ def analyze_symbol(
     # ------------------------------------------------------------------
     # AGGRESSIVE BREAKOUT PATH: no institutional hard-blocks
     # Immediate STRONG BUY when confidence >= MIN_CONFIDENCE (default 90).
-    # Lower-scoring breakouts keep levels as WAIT candidates for daily top-3.
+    # Lower-scoring about-to-breakouts keep levels as WAIT for daily top-5 fill.
     # TP ladder: TP1=50%, TP2=200%, TP3=800% (configurable).
     # ------------------------------------------------------------------
     if (
@@ -163,6 +163,7 @@ def analyze_symbol(
                 higher_tf_trend=higher_tf_summary(frames),
                 factor_scores={"Breakout Setup": breakout_factor.score},
                 trade_style="SPOT_BREAKOUT",
+                raw={"setup_kind": "pre_breakout" if pre else "breakout"},
             )
 
         min_conf = settings.min_confidence
@@ -170,14 +171,19 @@ def analyze_symbol(
         if confidence >= min_conf:
             verdict = Verdict.STRONG_BUY if force_sb or confidence >= 80 else Verdict.BUY
             direction = Direction.LONG
-            message = "SPOT BREAKOUT SETUP VALID"
+            message = (
+                "ABOUT TO BREAKOUT — SPOT EARLY ENTRY"
+                if pre
+                else "SPOT BREAKOUT SETUP VALID"
+            )
         else:
-            # Keep levels so daily quota can promote top picks to STRONG BUY
+            # Keep levels so daily quota can promote top about-to-breakout picks
             verdict = Verdict.WAIT
             direction = Direction.LONG
             message = NO_TRADE_MSG
             why = [
-                f"Breakout candidate below {min_conf:.0f}% (score {confidence:.1f}%) — eligible for daily top-3",
+                f"About-to-breakout candidate below {min_conf:.0f}% "
+                f"(score {confidence:.1f}%) — eligible for daily top-5",
                 *why,
             ]
 
@@ -202,7 +208,10 @@ def analyze_symbol(
             ],
             factor_scores={"Breakout Setup": round(breakout_factor.score, 2)},
             trade_style="SPOT_BREAKOUT",
-            raw={"factors": {"Breakout Setup": breakout_factor.details}},
+            raw={
+                "setup_kind": "pre_breakout" if pre else "breakout",
+                "factors": {"Breakout Setup": breakout_factor.details},
+            },
         )
 
     factors: list[FactorResult] = [
@@ -389,7 +398,20 @@ def analyze_symbol(
 
 def format_report(report: SignalReport) -> str:
     shown = display_symbol(report.symbol)
-    style = "BREAKOUT SWING" if report.trade_style == "SPOT_BREAKOUT" else "SPOT"
+    kind = str((report.raw or {}).get("setup_kind", "")).lower()
+    why_blob = " ".join(report.why_valid).lower()
+    is_pre = (
+        kind == "pre_breakout"
+        or "about to breakout" in why_blob
+        or "pre-breakout" in why_blob
+        or "coiled under" in why_blob
+    )
+    if is_pre:
+        style = "ABOUT TO BREAKOUT"
+    elif report.trade_style == "SPOT_BREAKOUT":
+        style = "BREAKOUT SWING"
+    else:
+        style = "SPOT"
     lines = [
         f"📊 MEXC {style} Signal — {shown}",
         f"Verdict: {report.verdict.value}",

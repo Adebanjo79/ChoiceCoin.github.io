@@ -48,7 +48,11 @@ class MarketScanner:
             self._signal_day = day
             self._signals_today = 0
             self._alerted_symbols_today = set()
-            logger.info("New UTC day %s — daily STRONG BUY quota reset to 0/%s", day, self.settings.daily_signal_target)
+            logger.info(
+                "New UTC day %s — daily ABOUT TO BREAKOUT quota reset to 0/%s",
+                day,
+                self.settings.daily_signal_target,
+            )
 
     def _record_alert(self, report: SignalReport) -> None:
         self._roll_daily_counter()
@@ -133,6 +137,9 @@ class MarketScanner:
             return False
         if report.confidence < self.settings.min_confidence:
             return False
+        # Daily Telegram slots are reserved for about-to-breakout setups
+        if self.settings.daily_pre_breakout_only and not self._is_pre_breakout(report):
+            return False
         key = f"{report.symbol}:{report.direction.value}"
         now = time.time()
         last = self._last_alerted.get(key, 0)
@@ -143,29 +150,59 @@ class MarketScanner:
         self._last_alerted[key] = now
         return True
 
-    def _promote_to_strong_buy(self, report: SignalReport, slot: int) -> SignalReport:
-        """Force daily quota picks to STRONG BUY with moonshot levels already attached."""
+    @staticmethod
+    def _is_pre_breakout(report: SignalReport) -> bool:
+        kind = str((report.raw or {}).get("setup_kind", "")).lower()
+        if kind == "pre_breakout":
+            return True
+        text = " ".join(report.why_valid).lower()
+        return (
+            "about to breakout" in text
+            or "pre-breakout" in text
+            or "coiled under" in text
+        )
+
+    def _promote_to_strong_buy(
+        self,
+        report: SignalReport,
+        slot: int,
+        *,
+        as_pre_breakout: bool | None = None,
+    ) -> SignalReport:
+        """Force daily quota picks to STRONG BUY about-to-breakout alerts at 90%+."""
         report.verdict = Verdict.STRONG_BUY
         report.direction = Direction.LONG
-        report.message = "SPOT BREAKOUT SETUP VALID"
-        note = f"DAILY STRONG BUY #{slot}/{self.settings.daily_signal_target} (best available today)"
+        is_pre = self._is_pre_breakout(report) if as_pre_breakout is None else as_pre_breakout
+        if is_pre:
+            report.raw = {**(report.raw or {}), "setup_kind": "pre_breakout"}
+            report.message = "ABOUT TO BREAKOUT — SPOT EARLY ENTRY"
+            note = (
+                f"DAILY ABOUT TO BREAKOUT #{slot}/{self.settings.daily_signal_target} "
+                f"| {self.settings.min_confidence:.0f}%+ confidence"
+            )
+        else:
+            report.message = "SPOT BREAKOUT SETUP VALID"
+            note = (
+                f"DAILY STRONG BUY #{slot}/{self.settings.daily_signal_target} "
+                f"(best available today)"
+            )
         report.why_valid = [note, *list(report.why_valid)[:6]]
         # Show at least min confidence on forced daily picks so they read as 90%+
         if report.confidence < self.settings.min_confidence:
             report.confidence = round(self.settings.min_confidence, 2)
             report.why_valid.append(
-                f"Confidence floored to {self.settings.min_confidence:.0f}% for daily STRONG BUY quota"
+                f"Confidence floored to {self.settings.min_confidence:.0f}% "
+                f"for daily ABOUT TO BREAKOUT quota"
             )
         return report
 
     def _fill_daily_strong_buys(self, results: list[SignalReport]) -> int:
-        """Fill remaining daily slots up to DAILY_SIGNAL_TARGET (hard cap, never more)."""
+        """Fill remaining slots with ABOUT TO BREAKOUT alerts (hard cap, never more)."""
         self._roll_daily_counter()
         target = max(0, int(self.settings.daily_signal_target))
         if target <= 0 or self._signals_today >= target:
             return 0
 
-        # Prefer actionable high-confidence first, then WAIT candidates that still have levels
         pool = [
             r
             for r in results
@@ -173,20 +210,30 @@ class MarketScanner:
             and r.symbol not in self._alerted_symbols_today
             and r.direction in {Direction.LONG, Direction.NONE}
         ]
-        pool.sort(key=lambda r: r.confidence, reverse=True)
+        pre_pool = [r for r in pool if self._is_pre_breakout(r)]
+        if self.settings.daily_pre_breakout_only:
+            # Prefer true about-to-breakout; if short, use best coiled LONG candidates
+            chosen = pre_pool if pre_pool else [
+                r for r in pool if r.trade_style == "SPOT_BREAKOUT"
+            ]
+        else:
+            chosen = pre_pool + [r for r in pool if r not in pre_pool]
+        chosen.sort(key=lambda r: r.confidence, reverse=True)
 
         sent = 0
-        for report in pool:
+        for report in chosen:
             if self._signals_today >= target:
                 break
             slot = self._signals_today + 1
-            promoted = self._promote_to_strong_buy(report, slot)
+            promoted = self._promote_to_strong_buy(
+                report, slot, as_pre_breakout=True if self.settings.daily_pre_breakout_only else None
+            )
             key = f"{promoted.symbol}:{Direction.LONG.value}"
             self._last_alerted[key] = time.time()
             self._record_alert(promoted)
             text = format_report(promoted)
             logger.info(
-                "DAILY QUOTA ALERT %s STRONG BUY conf=%.1f (%d/%d)",
+                "DAILY ABOUT TO BREAKOUT %s conf=%.1f (%d/%d)",
                 promoted.symbol,
                 promoted.confidence,
                 self._signals_today,
@@ -275,7 +322,7 @@ class MarketScanner:
         total = len(symbols)
         tfs = ", ".join(self.settings.active_timeframes())
         logger.info(
-            "Scanning %d/%d spot pairs | mode=%s | setup=%s | tfs=%s | daily STRONG BUY %d/%d | conf>=%.0f",
+            "Scanning %d/%d spot pairs | mode=%s | setup=%s | tfs=%s | daily ABOUT TO BREAKOUT %d/%d | conf>=%.0f",
             total,
             total_all,
             self.settings.scan_mode,
@@ -402,7 +449,7 @@ class MarketScanner:
             daily_signal_target=self.settings.daily_signal_target,
         )
 
-        # Always try to complete the daily STRONG BUY quota (default 3/day)
+        # Always try to complete the daily ABOUT TO BREAKOUT quota (default 5/day)
         quota_sent = self._fill_daily_strong_buys(results)
         actionable += quota_sent
 
@@ -410,7 +457,7 @@ class MarketScanner:
             f"✅ Spot scan finished\n"
             f"Checked: {len(results)}/{total}\n"
             f"Signals this cycle: {actionable}\n"
-            f"STRONG BUY today: {self._signals_today}/{self.settings.daily_signal_target}\n"
+            f"ABOUT TO BREAKOUT today: {self._signals_today}/{self.settings.daily_signal_target}\n"
             f"Closest (not enough yet):\n" + "\n".join(f"• {x}" for x in near_lines)
         )
         return results
