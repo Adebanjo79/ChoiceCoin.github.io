@@ -56,14 +56,25 @@ class TelegramApp:
 
     def is_owner(self, update: Update) -> bool:
         user = update.effective_user
-        return bool(user and user.id == self.config.telegram_owner_id)
+        if not user or not self.config.telegram_owner_id:
+            return False
+        return user.id == self.config.telegram_owner_id
 
     async def _deny(self, update: Update) -> None:
         if update.message:
-            await update.message.reply_text("Owner only.")
+            if not self.config.telegram_owner_id:
+                await update.message.reply_text(
+                    "TELEGRAM_OWNER_ID not set. Send /start to see your user id, "
+                    "then put it in .env and restart."
+                )
+            else:
+                await update.message.reply_text("Owner only.")
 
     def send_alert(self, text: str) -> None:
         """Thread-safe alert from watcher / RPC threads."""
+        if not self.config.telegram_owner_id:
+            logger.info("ALERT (no TELEGRAM_OWNER_ID):\n%s", text)
+            return
         if not self._app or self._loop is None:
             logger.info("ALERT (no telegram yet):\n%s", text)
             return
@@ -77,6 +88,8 @@ class TelegramApp:
 
     async def _send(self, text: str) -> None:
         assert self._app is not None
+        if not self.config.telegram_owner_id:
+            return
         await self._app.bot.send_message(
             chat_id=self.config.telegram_owner_id,
             text=text[:4000],
@@ -86,16 +99,18 @@ class TelegramApp:
     def online_message(self) -> str:
         cfg = self.config
         lines = [
-            "✅ NFT copy-mint bot online (Ink Chain)",
+            "✅ Ethbot → Ink Chain NFT copy-mint online",
+            f"Bot: @Adelaxethbot",
             f"Mode: {'DRY_RUN' if cfg.dry_run else 'LIVE'}"
             + (" | PAUSED" if self._paused else ""),
             f"Build: {self.build_sha} | v{__version__}",
-            f"Chain ID: {cfg.chain_id}",
+            f"Chain: Ink ({cfg.chain_id})",
             f"Targets: {len(self.watcher.targets)}",
             f"Mint wallets: {len(self.wallets.all())}",
             f"RPC endpoints: {len(cfg.rpc_urls)} ({self.rpc.status_line()})",
             f"FREE_MINTS_ONLY: {cfg.free_mints_only}",
             f"PENDING_DETECTION: {cfg.pending_detection}",
+            f"Owner ID: {cfg.telegram_owner_id or 'NOT SET'}",
             "",
             "Honest limits:",
             *[f"• {x}" for x in HONEST_LIMITS],
@@ -103,6 +118,18 @@ class TelegramApp:
         return "\n".join(lines)
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        user = update.effective_user
+        if user is None or update.message is None:
+            return
+        if not self.config.telegram_owner_id:
+            await update.message.reply_text(
+                "Ink Chain NFT copy-bot is running, but TELEGRAM_OWNER_ID is not set yet.\n\n"
+                f"Your Telegram user id is: {user.id}\n\n"
+                f"Set TELEGRAM_OWNER_ID={user.id} in .env (or secrets), restart the bot, "
+                "then send /status.\n\n"
+                "Also set TARGET_WALLETS and PRIVATE_KEYS. Keep DRY_RUN=true until tests look good."
+            )
+            return
         if not self.is_owner(update):
             return await self._deny(update)
         await update.message.reply_text(self.online_message())
@@ -222,8 +249,6 @@ class TelegramApp:
     def build_application(self) -> Application:
         if not self.config.telegram_bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN required")
-        if not self.config.telegram_owner_id:
-            raise ValueError("TELEGRAM_OWNER_ID required")
         app = Application.builder().token(self.config.telegram_bot_token).build()
         app.add_handler(CommandHandler("start", self.cmd_start))
         app.add_handler(CommandHandler("help", self.cmd_help))
@@ -243,4 +268,9 @@ async def bind_loop(tg: TelegramApp, application: Application) -> None:
     import asyncio
 
     tg._loop = asyncio.get_running_loop()
-    await tg._send(tg.online_message())
+    if tg.config.telegram_owner_id:
+        await tg._send(tg.online_message())
+    else:
+        logger.warning(
+            "TELEGRAM_OWNER_ID not set — message the bot with /start to learn your user id"
+        )
