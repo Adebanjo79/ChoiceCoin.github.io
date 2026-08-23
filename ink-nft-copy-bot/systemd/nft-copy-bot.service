@@ -1,0 +1,18 @@
+[Unit]
+Description=Ink Chain NFT copy-mint Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/nft-copy-bot
+EnvironmentFile=/opt/nft-copy-bot/.env
+ExecStart=/opt/nft-copy-bot/.venv/bin/python /opt/nft-copy-bot/main.py run
+Restart=always
+RestartSec=5
+# Do not kill mid-broadcast if possible
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

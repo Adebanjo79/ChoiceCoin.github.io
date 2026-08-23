@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/*.json
+!data/.gitkeep
+mint_wallets.json
+*.log
+nohup.out
