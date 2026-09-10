@@ -38,9 +38,9 @@ class Settings(BaseSettings):
     port: int = 8765
     log_level: str = "INFO"
 
-    # Binance public endpoints
-    binance_rest_base: str = "https://api.binance.com"
-    binance_ws_base: str = "wss://stream.binance.com:9443"
+    # Public market-data endpoints (vision mirrors work in more regions than api.binance.com)
+    binance_rest_base: str = "https://data-api.binance.vision"
+    binance_ws_base: str = "wss://data-stream.binance.vision"
 
     # Conservative fee model used for edge math (taker).
     taker_fee_bps: float = 10.0

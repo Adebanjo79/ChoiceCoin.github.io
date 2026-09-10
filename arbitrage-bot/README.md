@@ -37,8 +37,10 @@ Open **http://localhost:8765**
 | `MIN_EDGE_BPS` | `8` | Minimum **net** edge after fees |
 | `MAX_POSITION_USD` | `25` | Cap per paper fill |
 | `SCAN_SYMBOLS` | ~50 pairs | Markets to stream |
+| `BINANCE_REST_BASE` | `https://data-api.binance.vision` | Public REST host |
+| `BINANCE_WS_BASE` | `wss://data-stream.binance.vision` | Public WS host |
 
-Live trading (`PAPER_TRADING=false`) raises until you add signed Binance order routing — intentional, so the default path cannot place real orders.
+Defaults use Binance **vision** market-data hosts because `api.binance.com` is geo-blocked (HTTP 451) in some regions. Live trading (`PAPER_TRADING=false`) raises until you add signed Binance order routing — intentional, so the default path cannot place real orders.
 
 ## Tests
 
